@@ -1,0 +1,233 @@
+
+
+{% extends "base.html" %}
+
+{% block title %}Student Dashboard | CampusCare{% endblock %}
+
+{% block content %}
+
+<!-- Welcome section -->
+<div class="dashboard-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+    <div>
+        <p class="section-eyebrow mb-1">STUDENT PORTAL</p>
+        <h1 class="dashboard-title mb-2">
+            Welcome, {{ session.get('name') }}! 👋
+        </h1>
+        <p class="text-muted mb-0">
+            Submit complaints and keep track of their progress.
+        </p>
+    </div>
+
+    <a class="btn btn-primary btn-lg" href="{{ url_for('new_complaint') }}">
+        <span class="me-2">+</span> New Complaint
+    </a>
+</div>
+
+<!-- Summary cards -->
+<div class="row g-3 mb-4">
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-blue">▤</div>
+            <p class="summary-label">Total Complaints</p>
+            <h2 class="summary-number">{{ complaints|length }}</h2>
+            <p class="summary-note">All submitted complaints</p>
+        </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-amber">◷</div>
+            <p class="summary-label">Submitted</p>
+            <h2 class="summary-number">
+                {{ complaints|selectattr('status', 'equalto', 'Submitted')|list|length }}
+            </h2>
+            <p class="summary-note">Awaiting action</p>
+        </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-purple">↻</div>
+            <p class="summary-label">In Progress</p>
+            <h2 class="summary-number">
+                {{ complaints|selectattr('status', 'equalto', 'In Progress')|list|length }}
+            </h2>
+            <p class="summary-note">Being handled</p>
+        </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-green">✓</div>
+            <p class="summary-label">Resolved</p>
+            <h2 class="summary-number">
+                {{ complaints|selectattr('status', 'equalto', 'Resolved')|list|length }}
+            </h2>
+            <p class="summary-note">Successfully resolved</p>
+        </div>
+    </div>
+
+</div>
+
+<!-- Complaints table -->
+<div class="content-card">
+
+   
+<div class="content-card-header">
+    <div>
+        <h2 class="content-title">My Complaints</h2>
+        <p class="text-muted mb-0">View your submissions and current status.</p>
+    </div>
+
+    <span class="total-pill" id="complaintCount">
+        {{ complaints|length }} total
+    </span>
+</div>
+
+<!-- Search and filters -->
+<div class="complaint-filters">
+    <div class="filter-search">
+        <label for="complaintSearch" class="visually-hidden">
+            Search complaints
+        </label>
+        <input
+            type="search"
+            id="complaintSearch"
+            class="form-control"
+            placeholder="Search by title or reference..."
+            autocomplete="off">
+    </div>
+
+    <div class="filter-select">
+        <label for="statusFilter" class="visually-hidden">
+            Filter by status
+        </label>
+        <select id="statusFilter" class="form-select">
+            <option value="">All statuses</option>
+            <option value="Submitted">Submitted</option>
+            <option value="In Progress">In Progress</option>
+            <option value="Resolved">Resolved</option>
+            <option value="Rejected">Rejected</option>
+        </select>
+    </div>
+
+    <div class="filter-select">
+        <label for="categoryFilter" class="visually-hidden">
+            Filter by category
+        </label>
+        <select id="categoryFilter" class="form-select">
+            <option value="">All categories</option>
+            {% for category in complaints|map(attribute='category')|unique|sort %}
+            <option value="{{ category }}">{{ category }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <button type="button" id="resetComplaintFilters"
+            class="btn btn-outline-secondary">
+        Reset
+    </button>
+</div>
+
+<div class="filter-results-text" id="filterResultsText" aria-live="polite">
+    Showing {{ complaints|length }} complaints
+</div>
+
+
+    <div class="table-responsive">
+        <table class="table complaint-table mb-0">
+            <thead>
+                <tr>
+                    <th>Reference</th>
+                    <th>Complaint</th>
+                    <th>Category</th>
+                    <th>Status</th>
+                    <th>Submitted</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+
+            <tbody>
+            
+{% for c in complaints %}
+    <tr class="complaint-row"
+        data-title="{{ c.title|lower }}"
+        data-reference="CMP-{{ '%05d'|format(c.complaint_id) }}"
+        data-status="{{ c.status }}"
+        data-category="{{ c.category }}">
+
+                    <td>
+                        <span class="reference-number">
+                            CMP-{{ "%05d"|format(c.complaint_id) }}
+                        </span>
+                    </td>
+
+                    <td>
+                        <span class="complaint-title">{{ c.title }}</span>
+                    </td>
+
+                    <td>
+                        <span class="category-label">{{ c.category }}</span>
+                    </td>
+
+                    <td>
+                        {% if c.status == 'Submitted' %}
+                            <span class="status-badge status-submitted">
+                                <span class="status-dot"></span> Submitted
+                            </span>
+                        {% elif c.status == 'In Progress' %}
+                            <span class="status-badge status-progress">
+                                <span class="status-dot"></span> In Progress
+                            </span>
+                        {% elif c.status == 'Resolved' %}
+                            <span class="status-badge status-resolved">
+                                <span class="status-dot"></span> Resolved
+                            </span>
+                        {% elif c.status == 'Rejected' %}
+                            <span class="status-badge status-rejected">
+                                <span class="status-dot"></span> Rejected
+                            </span>
+                        {% else %}
+                            <span class="status-badge status-submitted">
+                                {{ c.status }}
+                            </span>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        <span class="date-label">{{ c.created_at }}</span>
+                    </td>
+
+                    <td>
+                        <a class="btn btn-view"
+                           href="{{ url_for('complaint_detail',
+                                            complaint_id=c.complaint_id) }}">
+                            View Details →
+                        </a>
+                    </td>
+                </tr>
+
+            {% else %}
+                <tr>
+                    <td colspan="6">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">▤</div>
+                            <h3>No complaints yet</h3>
+                            <p>You haven't submitted any complaints. Start by creating one.</p>
+                            <a class="btn btn-primary"
+                               href="{{ url_for('new_complaint') }}">
+                                + Submit Your First Complaint
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+</div>
+
+{% endblock %}
+

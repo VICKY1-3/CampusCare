@@ -1,0 +1,37 @@
+
+# Python virtual environment
+venv/
+.venv/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Local databases and database backups
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.backup
+*.sql
+
+# Local logs
+*.log
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+recovery_output/
+
+# Temporary database recovery scripts
+check_database.py
+check_dissect.py
+check_recovery.py

@@ -1,0 +1,107 @@
+
+
+{% extends "base.html" %}
+
+{% block title %}Register | CampusCare{% endblock %}
+
+{% block content %}
+<div class="auth-wrapper">
+    <div class="auth-card">
+
+        <div class="auth-logo">
+            <span class="brand-icon">
+                <svg xmlns="http://www.w3.org/2000/svg"
+                     width="24" height="24" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor"
+                     stroke-width="2.2" stroke-linecap="round"
+                     stroke-linejoin="round">
+                    <path d="M12 3 20 7.5 20 16.5 12 21 4 16.5 4 7.5Z"/>
+                    <path d="m8.5 12 2.3 2.3 4.8-4.8"/>
+                </svg>
+            </span>
+            <span>CampusCare</span>
+        </div>
+
+        <div class="auth-heading">
+            <p class="section-eyebrow">JOIN CAMPUSCARE</p>
+            <h1>Create your account</h1>
+            <p>Register to submit and track college complaints.</p>
+        </div>
+
+        <form method="post">
+            <div class="mb-3">
+                <label for="name" class="form-label">Full name</label>
+                <input
+                    type="text"
+                    class="form-control auth-input"
+                    id="name"
+                    name="name"
+                    maxlength="100"
+                    placeholder="Enter your full name"
+                    autocomplete="name"
+                    required>
+            </div>
+
+            <div class="mb-3">
+                <label for="email" class="form-label">Email address</label>
+                <input
+                    type="email"
+                    class="form-control auth-input"
+                    id="email"
+                    name="email"
+                    placeholder="you@example.com"
+                    autocomplete="email"
+                    required>
+            </div>
+
+            
+<div class="mb-4">
+    <label for="password" class="form-label">Password</label>
+
+    <div class="password-field">
+        <input
+            type="password"
+            class="form-control auth-input"
+            id="password"
+            name="password"
+            minlength="8"
+            placeholder="At least 8 characters"
+            autocomplete="new-password"
+            required>
+
+        <button
+            type="button"
+            class="password-toggle"
+            data-password-toggle="password"
+            aria-controls="password"
+            aria-label="Show password"
+            aria-pressed="false">
+            Show
+        </button>
+    </div>
+
+    <div class="password-hint">
+        Use at least 8 characters for your password.
+    </div>
+</div>
+
+
+            <button type="submit"
+                    class="btn btn-primary auth-submit w-100">
+                Create Account →
+            </button>
+        </form>
+
+        <div class="auth-switch">
+            Already have an account?
+            <a href="{{ url_for('login') }}">Login here</a>
+        </div>
+
+        <p class="auth-security">
+            Your account helps keep college complaints organized.
+        </p>
+
+    </div>
+</div>
+{% endblock %}
+

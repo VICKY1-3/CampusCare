@@ -1,0 +1,241 @@
+
+
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard | CampusCare{% endblock %}
+
+{% block content %}
+
+<!-- Admin header -->
+<div class="dashboard-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+    <div>
+        <p class="section-eyebrow mb-1">ADMINISTRATION PORTAL</p>
+        <h1 class="dashboard-title mb-2">Admin Dashboard</h1>
+        <p class="text-muted mb-0">
+            Monitor, review, and manage college complaints.
+        </p>
+    </div>
+
+    <div class="admin-welcome">
+        <span class="admin-avatar">A</span>
+        <div>
+            <div class="fw-bold">{{ session.get('name') }}</div>
+            <small class="text-muted">Administrator</small>
+        </div>
+    </div>
+</div>
+
+<!-- Statistics cards -->
+<div class="row g-3 mb-4">
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-blue">▤</div>
+            <p class="summary-label">Total Complaints</p>
+            <h2 class="summary-number">{{ counts.values()|sum }}</h2>
+            <p class="summary-note">All complaints received</p>
+        </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-amber">◷</div>
+            <p class="summary-label">Submitted</p>
+            <h2 class="summary-number">{{ counts.get('Submitted', 0) }}</h2>
+            <p class="summary-note">Awaiting action</p>
+        </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-purple">↻</div>
+            <p class="summary-label">In Progress</p>
+            <h2 class="summary-number">{{ counts.get('In Progress', 0) }}</h2>
+            <p class="summary-note">Currently being handled</p>
+        </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-green">✓</div>
+            <p class="summary-label">Resolved</p>
+            <h2 class="summary-number">{{ counts.get('Resolved', 0) }}</h2>
+            <p class="summary-note">Successfully resolved</p>
+        </div>
+    </div>
+
+</div>
+
+<!-- Complaints table and filters -->
+<div class="content-card">
+
+    <div class="content-card-header">
+        <div>
+            <h2 class="content-title">All Complaints</h2>
+            <p class="text-muted mb-0">
+                Review student submissions and update their progress.
+            </p>
+        </div>
+
+        <span class="total-pill" id="adminComplaintCount">
+            {{ complaints|length }} records
+        </span>
+    </div>
+
+    <!-- Search and filters -->
+    <div class="complaint-filters">
+
+        <div class="filter-search">
+            <label for="adminComplaintSearch" class="visually-hidden">
+                Search complaints
+            </label>
+            <input
+                type="search"
+                id="adminComplaintSearch"
+                class="form-control"
+                placeholder="Search title, reference, or student..."
+                autocomplete="off">
+        </div>
+
+        <div class="filter-select">
+            <label for="adminStatusFilter" class="visually-hidden">
+                Filter by status
+            </label>
+            <select id="adminStatusFilter" class="form-select">
+                <option value="">All statuses</option>
+                <option value="Submitted">Submitted</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Resolved">Resolved</option>
+                <option value="Rejected">Rejected</option>
+            </select>
+        </div>
+
+        <div class="filter-select">
+            <label for="adminCategoryFilter" class="visually-hidden">
+                Filter by category
+            </label>
+            <select id="adminCategoryFilter" class="form-select">
+                <option value="">All categories</option>
+                {% for category in complaints|map(attribute='category')|unique|sort %}
+                <option value="{{ category }}">{{ category }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <button type="button" id="adminResetFilters"
+                class="btn btn-outline-secondary">
+            Reset
+        </button>
+
+    </div>
+
+    <div class="filter-results-text" id="adminFilterResultsText"
+         aria-live="polite">
+        Showing {{ complaints|length }} complaints
+    </div>
+
+    <div class="table-responsive">
+        <table class="table complaint-table mb-0">
+            <thead>
+                <tr>
+                    <th>Reference</th>
+                    <th>Student</th>
+                    <th>Complaint</th>
+                    <th>Category</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+
+            <tbody>
+            {% for c in complaints %}
+                <tr class="admin-complaint-row"
+                    data-title="{{ c.title|lower }}"
+                    data-reference="CMP-{{ '%05d'|format(c.complaint_id) }}"
+                    data-student="{{ c.student_name|lower }}"
+                    data-email="{{ c.student_email|lower }}"
+                    data-status="{{ c.status }}"
+                    data-category="{{ c.category }}">
+
+                    <td>
+                        <span class="reference-number">
+                            CMP-{{ "%05d"|format(c.complaint_id) }}
+                        </span>
+                    </td>
+
+                    <td>
+                        <div class="complaint-title">{{ c.student_name }}</div>
+                        <small class="text-muted">{{ c.student_email }}</small>
+                    </td>
+
+                    <td>
+                        <span class="complaint-title">{{ c.title }}</span>
+                    </td>
+
+                    <td>
+                        <span class="category-label">{{ c.category }}</span>
+                    </td>
+
+                    <td>
+                        {% if c.status == 'Submitted' %}
+                            <span class="status-badge status-submitted">
+                                <span class="status-dot"></span> Submitted
+                            </span>
+                        {% elif c.status == 'In Progress' %}
+                            <span class="status-badge status-progress">
+                                <span class="status-dot"></span> In Progress
+                            </span>
+                        {% elif c.status == 'Resolved' %}
+                            <span class="status-badge status-resolved">
+                                <span class="status-dot"></span> Resolved
+                            </span>
+                        {% elif c.status == 'Rejected' %}
+                            <span class="status-badge status-rejected">
+                                <span class="status-dot"></span> Rejected
+                            </span>
+                        {% else %}
+                            <span class="status-badge status-submitted">
+                                {{ c.status }}
+                            </span>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        <a class="btn btn-view"
+                           href="{{ url_for('complaint_detail',
+                                            complaint_id=c.complaint_id) }}">
+                            Manage →
+                        </a>
+                    </td>
+                </tr>
+
+            {% else %}
+                <tr>
+                    <td colspan="6">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">▤</div>
+                            <h3>No complaints yet</h3>
+                            <p>Student complaints will appear here when submitted.</p>
+                        </div>
+                    </td>
+                </tr>
+            {% endfor %}
+
+                <tr id="adminNoMatches" hidden>
+                    <td colspan="6">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">⌕</div>
+                            <h3>No matching complaints found</h3>
+                            <p>Try changing your search or filters.</p>
+                        </div>
+                    </td>
+                </tr>
+
+            </tbody>
+        </table>
+    </div>
+
+</div>
+
+{% endblock %}
+

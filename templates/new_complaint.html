@@ -1,0 +1,102 @@
+
+{% extends "base.html" %}
+
+{% block title %}New Complaint | CampusCare{% endblock %}
+
+{% block content %}
+<div class="complaint-form-wrapper">
+
+    <div class="complaint-form-heading">
+        <p class="section-eyebrow">STUDENT PORTAL</p>
+        <h1>Submit a Complaint</h1>
+        <p>Tell us about the issue, and we'll help get it addressed.</p>
+    </div>
+
+    <div class="complaint-form-card">
+
+        <div class="complaint-form-card-header">
+            <div class="complaint-form-icon">✎</div>
+            <div>
+                <h2>Complaint Details</h2>
+                <p>Provide accurate information about your concern.</p>
+            </div>
+        </div>
+
+        <form method="post">
+
+            <div class="mb-4">
+                <label for="title" class="form-label">
+                    Complaint title <span class="required-star">*</span>
+                </label>
+                <input
+                    type="text"
+                    class="form-control complaint-input"
+                    id="title"
+                    name="title"
+                    maxlength="120"
+                    placeholder="e.g. Library books unavailable"
+                    required>
+                <div class="complaint-field-hint">
+                    Briefly describe the main issue.
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <label for="category" class="form-label">
+                    Category <span class="required-star">*</span>
+                </label>
+                <select
+                    class="form-select complaint-input"
+                    id="category"
+                    name="category"
+                    required>
+                    <option value="">Choose a complaint category</option>
+                    {% for category in categories %}
+                    <option value="{{ category }}">{{ category }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="mb-4">
+                <label for="description" class="form-label">
+                    Description <span class="required-star">*</span>
+                </label>
+                <textarea
+                    class="form-control complaint-input complaint-textarea"
+                    id="description"
+                    name="description"
+                    rows="6"
+                    maxlength="5000"
+                    placeholder="Explain the issue, where it occurred, and any relevant details..."
+                    required></textarea>
+                <div class="complaint-field-hint">
+                    Include enough detail to help the administration understand the issue.
+                </div>
+            </div>
+
+            <div class="complaint-form-notice">
+                <span aria-hidden="true">ⓘ</span>
+                Please provide clear and accurate information so your complaint can be reviewed.
+            </div>
+
+            <div class="complaint-form-actions">
+                <a class="btn btn-outline-secondary complaint-cancel-btn"
+                   href="{{ url_for('dashboard') }}">
+                    Cancel
+                </a>
+
+                <button type="submit"
+                        class="btn btn-primary complaint-submit-btn">
+                    Submit Complaint →
+                </button>
+            </div>
+
+        </form>
+    </div>
+
+    <p class="complaint-form-footer">
+        Your complaint will be recorded for review by the college administration.
+    </p>
+
+</div>
+{% endblock %}
