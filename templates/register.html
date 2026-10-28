@@ -31,6 +31,7 @@
         <form method="post">
             <div class="mb-3">
                 <label for="name" class="form-label">Full name</label>
+                
                 <input
                     type="text"
                     class="form-control auth-input"
@@ -41,6 +42,24 @@
                     autocomplete="name"
                     required>
             </div>
+            <div class="mb-3">
+        <label for="student_id" class="form-label">
+            College Student ID
+        </label>
+        <input
+            type="text"
+            class="form-control auth-input"
+            id="student_id"
+            name="student_id"
+            maxlength="30"
+            placeholder="e.g. colvivek"
+            autocomplete="off"
+            required>
+        <div class="password-hint">
+            Enter your approved college student ID.
+        </div>
+    </div>
+
 
             <div class="mb-3">
                 <label for="email" class="form-label">Email address</label>

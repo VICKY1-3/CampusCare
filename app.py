@@ -4,6 +4,8 @@ import psycopg
 from psycopg.rows import dict_row
 from functools import wraps
 from datetime import datetime
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 import click
 from flask import (
@@ -13,6 +15,14 @@ from flask import (
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[],
+    storage_uri="memory://"
+)
+
 app.config["SECRET_KEY"] = os.environ.get(
     "SECRET_KEY", "dev-only-change-this-before-deployment"
 )
@@ -37,7 +47,33 @@ def get_db():
             DATABASE_URL,
             row_factory=dict_row
         )
+        
     return g.db
+
+def log_security_event(event_type, student_id=None, details=None):
+    """Record a security event without storing passwords."""
+    try:
+        with psycopg.connect(
+            DATABASE_URL,
+            row_factory=dict_row
+        ) as db:
+            db.execute(
+                """
+                INSERT INTO security_audit_logs
+                    (event_type, student_id, ip_address, details)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (
+                    event_type,
+                    student_id,
+                    request.remote_addr,
+                    details
+                )
+            )
+            db.commit()
+    except psycopg.Error:
+        app.logger.exception("Could not save security audit event.")
+
 
 
 @app.teardown_appcontext
@@ -86,6 +122,68 @@ def init_db():
                 updated_at TEXT NOT NULL
             )
         """)
+                # Approved college student roster
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS approved_students (
+                student_id TEXT PRIMARY KEY,
+                student_name TEXT NOT NULL,
+                is_registered BOOLEAN NOT NULL DEFAULT FALSE
+            )
+        """)
+
+        # Add student_id to existing users without deleting accounts
+        db.execute("""
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS student_id TEXT
+        """)
+
+        # Prevent multiple accounts from using the same student ID
+        db.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS
+            users_student_id_unique
+            ON users (student_id)
+        """)
+
+        # Insert the 16 approved students
+        approved_students = [
+            ("colaamna", "Aamna"),
+            ("colabhishek", "Abhishek Dewangan"),
+            ("colamar", "Amar Gupta"),
+            ("colharshita", "Harshita Singh"),
+            ("colisha", "Isha Patel"),
+            ("colmenka", "Menka Sachdev"),
+            ("colnagesh", "Nagesh Baghel"),
+            ("colnidhi", "Nidhi Verma"),
+            ("colnisha", "Nisha Chauhan"),
+            ("colpallavi", "Pallavi Sahu"),
+            ("colpawan", "Pawan Kumar Shukla"),
+            ("colpushkar", "Pushkar Yadav"),
+            ("colshubhanshu", "Shubhanshu Nayak"),
+            ("colsunidhi", "Sunidhi Mishra"),
+            ("coltanisha", "Tanisha"),
+            ("colvivek", "Vivek Yadav"),
+        ]
+
+        # Record security-related events
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS security_audit_logs (
+                log_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                event_type TEXT NOT NULL,
+                student_id TEXT,
+                ip_address INET,
+                details TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+
+        db.cursor().executemany("""
+            INSERT INTO approved_students
+                (student_id, student_name)
+            VALUES (%s, %s)
+            ON CONFLICT (student_id)
+            DO UPDATE SET student_name = EXCLUDED.student_name
+        """, approved_students)
 
 
 @app.cli.command("init-db")
@@ -164,41 +262,123 @@ def index():
     return redirect(url_for("dashboard"))
 
 
+
 @app.route("/register", methods=["GET", "POST"])
+@limiter.limit("5 per hour")
 def register():
     if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        email = request.form.get("email", "").strip().lower()
+        name = " ".join(
+            request.form.get("name", "").strip().split()
+        )
+        student_id = request.form.get(
+            "student_id", ""
+        ).strip().lower()
+        email = request.form.get(
+            "email", ""
+        ).strip().lower()
         password = request.form.get("password", "")
 
-        if not name or not email or not password:
+        if not name or not student_id or not email or not password:
             flash("All fields are required.")
-        elif len(password) < 8:
+            return render_template("register.html")
+
+        if len(name) > 100 or len(student_id) > 30:
+            flash("Name or student ID is too long.")
+            return render_template("register.html")
+
+        if len(password) < 8:
             flash("Password must be at least 8 characters.")
-        
-        else:
-            db = get_db()
-            try:
-                db.execute(
-                    """
-                    INSERT INTO users (name, email, password_hash)
-                    VALUES (%s, %s, %s)
-                    """,
-                    (name, email, generate_password_hash(password))
-                )
-                db.commit()
-                flash("Registration successful. Please log in.")
-                return redirect(url_for("login"))
+            return render_template("register.html")
 
-            except psycopg.errors.UniqueViolation:
+        db = get_db()
+
+        try:
+            # Lock the roster entry so two requests cannot claim it together.
+            student = db.execute(
+                """
+                SELECT student_id, student_name, is_registered
+                FROM approved_students
+                WHERE student_id = %s
+                FOR UPDATE
+                """,
+                (student_id,)
+            ).fetchone()
+
+            if student is None:
                 db.rollback()
-                flash("That email is already registered.")
+                log_security_event(
+               "invalid_student_id",
+                student_id=student_id,
+                details="Registration attempted with an unapproved student ID"
+    ) 
+                flash("This student ID is not on the approved college list.")
+                return render_template("register.html")
 
+            if " ".join(student["student_name"].casefold().split()) != name.casefold():
+                db.rollback()
+                log_security_event(
+                 "student_name_mismatch",
+                 student_id=student_id,
+                details="Registration name did not match the approved student record"
+)
+                flash("The name does not match the approved student record.")
+                return render_template("register.html")
+
+            
+            if student["is_registered"]:
+                db.rollback()
+                log_security_event(
+                    "duplicate_student_id",
+                    student_id=student_id,
+                    details="Registration attempted with an already registered student ID"
+                )
+                flash("This college student ID has already been registered.")
+                return render_template("register.html")
+
+
+            # Claim the approved ID and create the account in one transaction.
+            db.execute(
+                """
+                UPDATE approved_students
+                SET is_registered = TRUE
+                WHERE student_id = %s
+                """,
+                (student_id,)
+            )
+
+            db.execute(
+                """
+                INSERT INTO users
+                    (name, email, password_hash, student_id)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (
+                    student["student_name"],
+                    email,
+                    generate_password_hash(password),
+                    student_id
+                )
+            )
+
+            db.commit()
+            flash("Registration successful. Please log in.")
+            return redirect(url_for("login"))
+
+        except psycopg.errors.UniqueViolation:
+            db.rollback()
+            flash("That email or student ID is already registered.")
+
+        except psycopg.Error:
+            db.rollback()
+            app.logger.exception("Student registration database error.")
+            flash("Registration could not be completed. Please try again.")
 
     return render_template("register.html")
 
 
+
 @app.route("/login", methods=["GET", "POST"])
+@limiter.limit("5 per minute")
 def login():
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
@@ -216,6 +396,10 @@ def login():
             session["role"] = user["role"]
             return redirect(url_for("index"))
 
+        log_security_event(
+        "failed_login",
+        details="Login attempted with invalid credentials"
+         )
         flash("Invalid email or password.")
 
     return render_template("login.html")
@@ -249,6 +433,7 @@ def dashboard():
 
 @app.route("/complaint/new", methods=["GET", "POST"])
 @login_required
+@limiter.limit("5 per hour")
 def new_complaint():
     if session["role"] != "student":
         abort(403)
@@ -486,6 +671,10 @@ def update_complaint(complaint_id):
     return redirect(url_for("complaint_detail",
                             complaint_id=complaint_id))
 
+
+@app.errorhandler(429)
+def ratelimit_handler(error):
+    return render_template("429.html"), 429
 
 @app.errorhandler(403)
 def forbidden(error):
