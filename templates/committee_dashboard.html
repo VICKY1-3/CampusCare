@@ -1,0 +1,251 @@
+
+{% extends "base.html" %}
+
+{% block title %}Committee Dashboard | CampusCare{% endblock %}
+
+{% block content %}
+
+<!-- Committee header -->
+<div class="dashboard-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+    <div>
+        <p class="section-eyebrow mb-1">COMMITTEE PORTAL</p>
+        <h1 class="dashboard-title mb-2">Committee Dashboard</h1>
+        <p class="text-muted mb-0">
+            Review escalated complaints assigned to you and record formal decisions.
+        </p>
+    </div>
+
+    <div class="admin-welcome">
+        <span class="admin-avatar">C</span>
+        <div>
+            <div class="fw-bold">{{ session.get('name') }}</div>
+            <small class="text-muted">Committee Member</small>
+        </div>
+    </div>
+</div>
+
+<!-- Summary cards -->
+<div class="row g-3 mb-4">
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-blue">▤</div>
+            <p class="summary-label">Assigned Escalations</p>
+            <h2 class="summary-number">{{ escalations|length }}</h2>
+            <p class="summary-note">Total cases assigned to you</p>
+        </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-amber">◷</div>
+            <p class="summary-label">Awaiting Review</p>
+            <h2 class="summary-number">
+                {{ escalations|selectattr('status', 'in', ['Pending', 'Referred to Committee'])|list|length }}
+            </h2>
+            <p class="summary-note">Ready to start review</p>
+        </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-purple">↻</div>
+            <p class="summary-label">Under Review / Decided</p>
+            <h2 class="summary-number">
+                {{ escalations|selectattr('status', 'in', ['Under Review', 'Decision Issued'])|list|length }}
+            </h2>
+            <p class="summary-note">Active committee cases</p>
+        </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-green">✓</div>
+            <p class="summary-label">Closed</p>
+            <h2 class="summary-number">
+                {{ escalations|selectattr('status', 'equalto', 'Closed')|list|length }}
+            </h2>
+            <p class="summary-note">Completed escalations</p>
+        </div>
+    </div>
+
+</div>
+
+<!-- Escalations table -->
+<div class="content-card">
+
+    <div class="content-card-header">
+        <div>
+            <h2 class="content-title">Assigned Escalations</h2>
+            <p class="text-muted mb-0">
+                Inspect complaint details, review escalation reasons, and issue decisions.
+            </p>
+        </div>
+
+        <span class="total-pill">
+            {{ escalations|length }} records
+        </span>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table complaint-table mb-0">
+            <thead>
+                <tr>
+                    <th>Escalation</th>
+                    <th>Complaint</th>
+                    <th>Student</th>
+                    <th>Category</th>
+                    <th>Complaint Status</th>
+                    <th>Escalation Status</th>
+                    <th style="min-width: 240px;">Reason</th>
+                    <th style="min-width: 220px;">Actions</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for item in escalations %}
+                <tr>
+                    <td>
+                        <span class="reference-number">
+                            ESC-{{ "%05d"|format(item.escalation_id) }}
+                        </span>
+                    </td>
+
+                    <td>
+                        <div class="complaint-title">{{ item.complaint_title }}</div>
+                        <small class="text-muted">CMP-{{ "%05d"|format(item.complaint_id) }}</small>
+                    </td>
+
+                    <td>
+                        <div class="complaint-title">{{ item.student_name }}</div>
+                        <small class="text-muted">{{ item.student_email }}</small>
+                    </td>
+
+                    <td>
+                        <span class="category-label">{{ item.complaint_category }}</span>
+                    </td>
+
+                    <td>
+                        {% if item.complaint_status == 'Submitted' %}
+                            <span class="status-badge status-submitted">
+                                <span class="status-dot"></span> Submitted
+                            </span>
+                        {% elif item.complaint_status == 'In Progress' %}
+                            <span class="status-badge status-progress">
+                                <span class="status-dot"></span> In Progress
+                            </span>
+                        {% elif item.complaint_status == 'Resolved' %}
+                            <span class="status-badge status-resolved">
+                                <span class="status-dot"></span> Resolved
+                            </span>
+                        {% elif item.complaint_status == 'Rejected' %}
+                            <span class="status-badge status-rejected">
+                                <span class="status-dot"></span> Rejected
+                            </span>
+                        {% else %}
+                            <span class="status-badge status-submitted">
+                                {{ item.complaint_status }}
+                            </span>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if item.status in ['Pending', 'Referred to Committee'] %}
+                            <span class="status-badge status-submitted">
+                                <span class="status-dot"></span> {{ item.status }}
+                            </span>
+                        {% elif item.status == 'Under Review' %}
+                            <span class="status-badge status-progress">
+                                <span class="status-dot"></span> Under Review
+                            </span>
+                        {% elif item.status in ['Decision Issued', 'Closed'] %}
+                            <span class="status-badge status-resolved">
+                                <span class="status-dot"></span> {{ item.status }}
+                            </span>
+                        {% else %}
+                            <span class="status-badge status-submitted">
+                                {{ item.status }}
+                            </span>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        <p class="mb-0 text-muted small" style="line-height: 1.5;">
+                            {{ item.reason }}
+                        </p>
+                    </td>
+
+                    <td>
+                        <div class="d-flex flex-column gap-2">
+                            <a class="btn btn-view text-center"
+                               href="{{ url_for('complaint_detail', complaint_id=item.complaint_id) }}">
+                                View Details →
+                            </a>
+
+                            {% if item.status in ['Pending', 'Referred to Committee'] %}
+                            <form method="POST"
+                                  action="{{ url_for('committee_update_escalation', escalation_id=item.escalation_id) }}">
+                                <input type="hidden" name="action" value="review">
+                                <button type="submit" class="btn btn-sm btn-primary w-100 fw-semibold">
+                                    Start Review
+                                </button>
+                            </form>
+                            {% endif %}
+
+                            {% if item.status == 'Under Review' %}
+                            <form method="POST"
+                                  action="{{ url_for('committee_update_escalation', escalation_id=item.escalation_id) }}"
+                                  class="p-2 border rounded bg-light">
+                                <label class="form-label small fw-bold mb-1">Decision</label>
+                                <select name="decision" class="form-select form-select-sm mb-2" required>
+                                    <option value="">Select decision</option>
+                                    <option value="Action Required">Action Required</option>
+                                    <option value="Rejected">Rejected</option>
+                                    <option value="Resolved">Resolved</option>
+                                </select>
+
+                                <label class="form-label small fw-bold mb-1">Decision Remarks</label>
+                                <textarea name="remarks"
+                                          class="form-control form-control-sm mb-2"
+                                          rows="2"
+                                          maxlength="1000"
+                                          required
+                                          placeholder="Explain the committee's decision"></textarea>
+
+                                <input type="hidden" name="action" value="decision">
+                                <button type="submit" class="btn btn-sm btn-primary w-100 fw-semibold">
+                                    Issue Decision
+                                </button>
+                            </form>
+                            {% endif %}
+
+                            {% if item.status == 'Decision Issued' %}
+                            <form method="POST"
+                                  action="{{ url_for('committee_update_escalation', escalation_id=item.escalation_id) }}">
+                                <input type="hidden" name="action" value="close">
+                                <button type="submit" class="btn btn-sm btn-outline-success w-100 fw-semibold">
+                                    Close Escalation
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">▤</div>
+                            <h3>No escalations assigned</h3>
+                            <p class="mb-0">Escalated complaints referred to you will appear here.</p>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+</div>
+
+{% endblock %}

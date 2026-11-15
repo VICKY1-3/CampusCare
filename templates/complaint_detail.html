@@ -1,4 +1,3 @@
-
 {% extends "base.html" %}
 
 {% block title %}Complaint Details | CampusCare{% endblock %}
@@ -25,13 +24,28 @@
     <div class="content-card detail-info-card mb-4">
         <div class="detail-info-header">
             <div>
-                <span class="reference-number">
-                    CMP-{{ "%05d"|format(complaint.complaint_id) }}
-                </span>
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                    <span class="reference-number">
+                        CMP-{{ "%05d"|format(complaint.complaint_id) }}
+                    </span>
+                    {% if complaint.priority == 'High' %}
+                        <span class="badge bg-danger">High / Emergency Priority</span>
+                    {% elif complaint.priority == 'Low' %}
+                        <span class="badge bg-secondary">Low Priority</span>
+                    {% else %}
+                        <span class="badge bg-info text-dark">Medium Priority</span>
+                    {% endif %}
+                    {% if complaint.upvote_count > 1 %}
+                        <span class="badge bg-light text-dark border">👍 {{ complaint.upvote_count }} students affected</span>
+                    {% endif %}
+                </div>
                 <h2 class="detail-complaint-title mt-2">
                     {{ complaint.title }}
                 </h2>
-                <span class="category-label">{{ complaint.category }}</span>
+                <div class="d-flex flex-wrap gap-2 mt-1">
+                    <span class="category-label">Category: {{ complaint.category }}</span>
+                    <span class="text-primary fw-semibold small">| 🏢 Routed to: {{ complaint.routed_department or 'General Administration' }}</span>
+                </div>
             </div>
 
             <div>
@@ -59,14 +73,46 @@
             </div>
         </div>
 
+        {% if complaint.sla_due_at %}
+        <div class="px-4 py-2 bg-light border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <span class="small text-muted">
+                ⏳ <strong>Target SLA Due:</strong> {{ complaint.sla_due_at.strftime('%d %b %Y, %H:%M') }}
+            </span>
+            {% if complaint.status in ['Submitted', 'In Progress'] and complaint.sla_due_at < now_utc %}
+                <span class="badge bg-danger font-monospace">OVERDUE TICKET</span>
+            {% else %}
+                <span class="badge bg-success bg-opacity-10 text-success border border-success small">On Track</span>
+            {% endif %}
+        </div>
+        {% endif %}
+        <!-- AI Smart Insights Box -->
+        <div class="px-4 py-3 bg-primary bg-opacity-10 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+                <span class="badge bg-primary me-2">✨ CampusCare AI Assistant</span>
+                <span class="small fw-semibold text-dark">Sentiment Analysis: {{ ai_insights.sentiment }}</span>
+            </div>
+            <span class="badge bg-white text-dark border">{{ ai_insights.badge }}</span>
+        </div>
+
         <div class="detail-description">
             <h3>Description</h3>
             <p class="description mb-0">{{ complaint.description }}</p>
         </div>
 
-        <div class="detail-submitted">
-            <span class="detail-meta-label">Originally submitted</span>
-            <span>{{ complaint.created_at }}</span>
+        <div class="detail-submitted d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+                <span class="detail-meta-label">Originally submitted</span>
+                <span>{{ complaint.created_at }}</span>
+            </div>
+            {% if session.get('role') == 'student' and complaint.status in ['Submitted', 'In Progress'] %}
+            <div>
+                <form method="post" action="{{ url_for('upvote_complaint', complaint_id=complaint.complaint_id) }}">
+                    <button type="submit" class="btn btn-sm btn-outline-primary fw-semibold">
+                        👍 Upvote / Me Too ({{ complaint.upvote_count }})
+                    </button>
+                </form>
+            </div>
+            {% endif %}
         </div>
     </div>
 
@@ -79,7 +125,7 @@
                     Follow every recorded status update and admin remark.
                 </p>
             </div>
-            <span class="total-pill">{{ updates|length + 1 }} events</span>
+            <span class="total-pill">{{ updates|length + escalation_history|length + 1 }} events</span>
         </div>
 
         <div class="timeline">
@@ -105,7 +151,7 @@
                 </div>
             </div>
 
-            <!-- Saved admin updates -->
+           <!-- Saved admin updates -->
             {% for u in updates %}
             <div class="timeline-item
                 {% if u.status == 'Resolved' %}timeline-resolved
@@ -158,8 +204,86 @@
             </div>
             {% endfor %}
 
+            <!-- Committee escalation history -->
+            {% for event in escalation_history %}
+            <div class="timeline-item timeline-updated">
+                <div class="timeline-marker">
+                    <span>↻</span>
+                </div>
+
+                <div class="timeline-event">
+                    <div class="timeline-event-heading">
+                        <h3>{{ event.action }}</h3>
+                        <span class="timeline-date">
+                            {{ event.created_at.strftime('%d %b %Y, %I:%M %p') }}
+                        </span>
+                    </div>
+
+                    <p class="timeline-message">
+                        {{ event.notes or "No additional details." }}
+                    </p>
+
+                    <span class="timeline-actor">
+                        Recorded by {{ event.actor_name }}
+                    </span>
+                </div>
+            </div>
+            {% endfor %}
+
         </div>
     </div>
+
+    <!-- Student escalation request -->
+    {% if session.get('role') == 'student' %}
+    <div class="content-card admin-update-card mb-4">
+        <div class="content-card-header">
+            <div>
+                <h2 class="content-title">Request Escalation</h2>
+                <p class="text-muted mb-0">
+                    Ask the administration to forward this complaint to the Committee if it remains unresolved.
+                </p>
+            </div>
+            {% if active_escalation %}
+            <span class="status-badge status-progress">
+                <span class="status-dot"></span> {{ active_escalation.status }}
+            </span>
+            {% endif %}
+        </div>
+
+        <div class="p-4">
+            {% if active_escalation %}
+                <div class="complaint-form-notice mb-0">
+                    <span aria-hidden="true">ⓘ</span>
+                    <div>
+                        <strong>Escalation in progress ({{ active_escalation.status }})</strong><br>
+                        Reason submitted: {{ active_escalation.reason }}
+                    </div>
+                </div>
+            {% else %}
+                <form method="post"
+                      action="{{ url_for('request_escalation',
+                                         complaint_id=complaint.complaint_id) }}">
+
+                    <label for="student_escalation_reason" class="form-label fw-semibold">
+                        Reason for Escalation <span class="required-star">*</span>
+                    </label>
+
+                    <textarea id="student_escalation_reason"
+                              name="reason"
+                              class="form-control mb-3"
+                              maxlength="1000"
+                              rows="3"
+                              required
+                              placeholder="Explain why you are requesting Committee escalation..."></textarea>
+
+                    <button type="submit" class="btn btn-primary">
+                        Submit Escalation Request →
+                    </button>
+                </form>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
 
     <!-- Admin update form -->
     {% if session.get('role') == 'admin' %}
@@ -210,7 +334,133 @@
     </div>
     {% endif %}
 
+    <!-- Admin escalation review or direct referral -->
+    {% if session.get('role') == 'admin' %}
+    <div class="content-card admin-update-card mb-4">
+        <div class="content-card-header">
+            <div>
+                <h2 class="content-title">
+                    {% if active_escalation and active_escalation.status == 'Pending' %}
+                        Review Student Escalation Request
+                    {% elif active_escalation %}
+                        Committee Escalation Status
+                    {% else %}
+                        Direct Referral to Committee
+                    {% endif %}
+                </h2>
+                <p class="text-muted mb-0">
+                    {% if active_escalation and active_escalation.status == 'Pending' %}
+                        A student has requested Committee escalation for this complaint.
+                    {% elif active_escalation %}
+                        This complaint is currently assigned to the Committee.
+                    {% else %}
+                        Refer an eligible complaint directly to an authorized committee member.
+                    {% endif %}
+                </p>
+            </div>
+            {% if active_escalation %}
+            <span class="status-badge status-progress">
+                <span class="status-dot"></span> {{ active_escalation.status }}
+            </span>
+            {% endif %}
+        </div>
+
+        <div class="p-4">
+            {% if active_escalation and active_escalation.status == 'Pending' %}
+                <div class="complaint-form-notice mb-4">
+                    <span aria-hidden="true">ⓘ</span>
+                    <div>
+                        <strong>Requested by {{ active_escalation.requester_name or 'Student' }}</strong><br>
+                        Student's reason: {{ active_escalation.reason }}
+                    </div>
+                </div>
+
+                <form method="post"
+                      action="{{ url_for('review_escalation',
+                                         escalation_id=active_escalation.escalation_id) }}">
+
+                    <label for="review_decision" class="form-label fw-semibold">
+                        Admin Decision <span class="required-star">*</span>
+                    </label>
+                    <select id="review_decision" name="decision"
+                            class="form-select mb-3" required>
+                        <option value="">Choose action</option>
+                        <option value="accept">Accept &amp; Forward to Committee</option>
+                        <option value="reject">Reject Escalation Request</option>
+                    </select>
+
+                    <label for="review_assigned_to" class="form-label fw-semibold">
+                        Assign Committee Member (required if accepting)
+                    </label>
+                    <select id="review_assigned_to" name="assigned_to"
+                            class="form-select mb-3">
+                        <option value="">Select a committee member</option>
+                        {% for member in committee_members %}
+                        <option value="{{ member.user_id }}">
+                            {{ member.name }} ({{ member.email }})
+                        </option>
+                        {% endfor %}
+                    </select>
+
+                    <label for="review_notes" class="form-label fw-semibold">
+                        Remarks / Rejection Reason
+                    </label>
+                    <textarea id="review_notes" name="notes"
+                              class="form-control mb-3"
+                              maxlength="1000" rows="3"
+                              placeholder="Required if rejecting; optional note if accepting..."></textarea>
+
+                    <button type="submit" class="btn btn-primary">
+                        Submit Review Decision →
+                    </button>
+                </form>
+
+            {% elif active_escalation %}
+                <div class="complaint-form-notice mb-0">
+                    <span aria-hidden="true">ⓘ</span>
+                    <div>
+                        <strong>Assigned to {{ active_escalation.assignee_name or 'Committee Member' }}</strong> ({{ active_escalation.status }})<br>
+                        Reason: {{ active_escalation.reason }}
+                    </div>
+                </div>
+
+            {% else %}
+                <form method="post"
+                      action="{{ url_for('escalate_complaint',
+                                         complaint_id=complaint.complaint_id) }}">
+
+                    <label for="assigned_to" class="form-label fw-semibold">
+                        Committee Member <span class="required-star">*</span>
+                    </label>
+
+                    <select id="assigned_to" name="assigned_to"
+                            class="form-select mb-3" required>
+                        <option value="">Select a committee member</option>
+                        {% for member in committee_members %}
+                        <option value="{{ member.user_id }}">
+                            {{ member.name }} ({{ member.email }})
+                        </option>
+                        {% endfor %}
+                    </select>
+
+                    <label for="reason" class="form-label fw-semibold">
+                        Reason for Direct Referral <span class="required-star">*</span>
+                    </label>
+
+                    <textarea id="reason" name="reason"
+                              class="form-control mb-3"
+                              maxlength="1000" rows="4" required
+                              placeholder="Explain why this complaint needs direct committee review..."></textarea>
+
+                    <button type="submit" class="btn btn-primary">
+                        Refer to Committee →
+                    </button>
+                </form>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
 </div>
 
 {% endblock %}
-

@@ -1028,3 +1028,58 @@ body {
         height: 300px;
     }
 }
+/* Dark Mode Theme Overrides */
+[data-bs-theme="dark"] {
+    --bs-body-bg: #0f172a;
+    --bs-body-color: #f1f5f9;
+    --bs-card-bg: #1e293b;
+    --bs-card-border-color: #334155;
+    --bs-border-color: #334155;
+    --bs-tertiary-bg: #1e293b;
+}
+
+[data-bs-theme="dark"] body,
+[data-bs-theme="dark"] h1, 
+[data-bs-theme="dark"] h2, 
+[data-bs-theme="dark"] h3, 
+[data-bs-theme="dark"] h4, 
+[data-bs-theme="dark"] h5, 
+[data-bs-theme="dark"] .dashboard-title,
+[data-bs-theme="dark"] .content-title,
+[data-bs-theme="dark"] .summary-number,
+[data-bs-theme="dark"] .complaint-title {
+    color: #ffffff !important;
+}
+
+[data-bs-theme="dark"] .content-card,
+[data-bs-theme="dark"] .complaint-form-card,
+[data-bs-theme="dark"] .summary-card {
+    background-color: #1e293b !important;
+    color: #f8fafc !important;
+    border-color: #334155 !important;
+}
+
+[data-bs-theme="dark"] .text-muted {
+    color: #94a3b8 !important; /* Lighter muted gray for readability on dark backgrounds */
+}
+
+[data-bs-theme="dark"] .form-control,
+[data-bs-theme="dark"] .form-select {
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    border-color: #334155 !important;
+}
+
+[data-bs-theme="dark"] .table {
+    color: #f1f5f9 !important;
+}
+
+[data-bs-theme="dark"] .table-hover tbody tr:hover {
+    background-color: #334155 !important;
+    color: #ffffff !important;
+}
+
+/* Smooth transition for theme switching */
+body, .content-card, .complaint-form-card, .form-control, .form-select, .summary-card {
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}

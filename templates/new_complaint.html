@@ -12,6 +12,45 @@
         <p>Tell us about the issue, and we'll help get it addressed.</p>
     </div>
 
+    <!-- Duplicate Complaint Warning Modal / Banner -->
+    {% if duplicate_match %}
+    <div class="content-card mb-4 border-warning shadow-sm">
+        <div class="content-card-header bg-warning bg-opacity-10">
+            <div>
+                <h2 class="content-title text-warning-emphasis">⚠️ Similar Complaint Detected</h2>
+                <p class="text-muted mb-0">A similar issue was logged within the last 24 hours in this category.</p>
+            </div>
+            <span class="total-pill bg-warning text-dark">Match Found</span>
+        </div>
+        <div class="p-4">
+            <div class="mb-3">
+                <h5 class="fw-bold text-dark">{{ duplicate_match.title }}</h5>
+                <p class="text-muted small mb-2">Logged on: {{ duplicate_match.created_at }}</p>
+                <p class="text-secondary">{{ duplicate_match.description[:250] }}{% if duplicate_match.description|length > 250 %}...{% endif %}</p>
+            </div>
+
+            <div class="d-flex flex-wrap gap-3 align-items-center pt-2 border-top">
+                <form method="post" action="{{ url_for('upvote_complaint', complaint_id=duplicate_match.complaint_id) }}">
+                    <button type="submit" class="btn btn-warning fw-semibold px-4">
+                        👍 Upvote Existing Ticket (CMP-{{ "%05d"|format(duplicate_match.complaint_id) }})
+                    </button>
+                </form>
+
+                <form method="post" class="d-inline">
+                    <input type="hidden" name="title" value="{{ form_data.title }}">
+                    <input type="hidden" name="description" value="{{ form_data.description }}">
+                    <input type="hidden" name="category" value="{{ form_data.category }}">
+                    <input type="hidden" name="priority" value="{{ form_data.priority }}">
+                    <input type="hidden" name="bypass_duplicate" value="true">
+                    <button type="submit" class="btn btn-outline-secondary btn-sm">
+                        Proceed Anyway (Submit New Ticket)
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="complaint-form-card">
 
         <div class="complaint-form-card-header">
@@ -34,27 +73,50 @@
                     id="title"
                     name="title"
                     maxlength="120"
-                    placeholder="e.g. Library books unavailable"
+                    value="{{ form_data.title if form_data else '' }}"
+                    placeholder="e.g. Library books unavailable or Hostel Wi-Fi down"
                     required>
                 <div class="complaint-field-hint">
-                    Briefly describe the main issue.
+                    Briefly describe the main issue. Keywords help auto-route your ticket.
                 </div>
             </div>
 
-            <div class="mb-4">
-                <label for="category" class="form-label">
-                    Category <span class="required-star">*</span>
-                </label>
-                <select
-                    class="form-select complaint-input"
-                    id="category"
-                    name="category"
-                    required>
-                    <option value="">Choose a complaint category</option>
-                    {% for category in categories %}
-                    <option value="{{ category }}">{{ category }}</option>
-                    {% endfor %}
-                </select>
+            <div class="row">
+                <div class="col-md-6 mb-4">
+                    <label for="category" class="form-label">
+                        Category <span class="required-star">*</span>
+                    </label>
+                    <select
+                        class="form-select complaint-input"
+                        id="category"
+                        name="category"
+                        required>
+                        <option value="">Choose a complaint category</option>
+                        {% for category in categories %}
+                        <option value="{{ category }}" {% if form_data and form_data.category == category %}selected{% endif %}>
+                            {{ category }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-md-6 mb-4">
+                    <label for="priority" class="form-label">
+                        Preferred Urgency / Priority (Optional)
+                    </label>
+                    <select
+                        class="form-select complaint-input"
+                        id="priority"
+                        name="priority">
+                        <option value="">Auto-detect (Recommended)</option>
+                        <option value="High" {% if form_data and form_data.priority == 'High' %}selected{% endif %}>High / Emergency</option>
+                        <option value="Medium" {% if form_data and form_data.priority == 'Medium' %}selected{% endif %}>Medium</option>
+                        <option value="Low" {% if form_data and form_data.priority == 'Low' %}selected{% endif %}>Low</option>
+                    </select>
+                    <div class="complaint-field-hint">
+                        System automatically flags safety hazards and urgent keywords as High priority.
+                    </div>
+                </div>
             </div>
 
             <div class="mb-4">
@@ -68,15 +130,15 @@
                     rows="6"
                     maxlength="5000"
                     placeholder="Explain the issue, where it occurred, and any relevant details..."
-                    required></textarea>
+                    required>{{ form_data.description if form_data else '' }}</textarea>
                 <div class="complaint-field-hint">
-                    Include enough detail to help the administration understand the issue.
+                    Include enough detail to help administration route and investigate the issue.
                 </div>
             </div>
 
             <div class="complaint-form-notice">
                 <span aria-hidden="true">ⓘ</span>
-                Please provide clear and accurate information so your complaint can be reviewed.
+                Your complaint will be automatically routed to the appropriate department with an SLA target.
             </div>
 
             <div class="complaint-form-actions">

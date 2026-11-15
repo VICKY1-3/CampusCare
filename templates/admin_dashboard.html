@@ -12,15 +12,21 @@
         <p class="section-eyebrow mb-1">ADMINISTRATION PORTAL</p>
         <h1 class="dashboard-title mb-2">Admin Dashboard</h1>
         <p class="text-muted mb-0">
-            Monitor, review, and manage college complaints.
+            Monitor, review, manage college complaints, and track SLA deadlines.
         </p>
     </div>
 
-    <div class="admin-welcome">
-        <span class="admin-avatar">A</span>
-        <div>
-            <div class="fw-bold">{{ session.get('name') }}</div>
-            <small class="text-muted">Administrator</small>
+    <div class="d-flex flex-wrap align-items-center gap-3">
+        <a href="{{ url_for('admin_analytics') }}" class="btn btn-primary fw-semibold">
+            📊 View Analytics &amp; Reports →
+        </a>
+
+        <div class="admin-welcome">
+            <span class="admin-avatar">A</span>
+            <div>
+                <div class="fw-bold">{{ session.get('name') }}</div>
+                <small class="text-muted">Administrator</small>
+            </div>
         </div>
     </div>
 </div>
@@ -71,9 +77,9 @@
 
     <div class="content-card-header">
         <div>
-            <h2 class="content-title">All Complaints</h2>
+            <h2 class="content-title">All Complaints & SLA Tracker</h2>
             <p class="text-muted mb-0">
-                Review student submissions and update their progress.
+                Review student submissions, department routing, priorities, and deadlines.
             </p>
         </div>
 
@@ -93,7 +99,7 @@
                 type="search"
                 id="adminComplaintSearch"
                 class="form-control"
-                placeholder="Search title, reference, or student..."
+                placeholder="Search title, reference, student, or department..."
                 autocomplete="off">
         </div>
 
@@ -140,8 +146,9 @@
                 <tr>
                     <th>Reference</th>
                     <th>Student</th>
-                    <th>Complaint</th>
-                    <th>Category</th>
+                    <th>Complaint &amp; Department</th>
+                    <th>Priority</th>
+                    <th>SLA / Due</th>
                     <th>Status</th>
                     <th>Action</th>
                 </tr>
@@ -154,6 +161,7 @@
                     data-reference="CMP-{{ '%05d'|format(c.complaint_id) }}"
                     data-student="{{ c.student_name|lower }}"
                     data-email="{{ c.student_email|lower }}"
+                    data-department="{{ c.routed_department|lower }}"
                     data-status="{{ c.status }}"
                     data-category="{{ c.category }}">
 
@@ -161,6 +169,9 @@
                         <span class="reference-number">
                             CMP-{{ "%05d"|format(c.complaint_id) }}
                         </span>
+                        {% if c.upvote_count > 1 %}
+                        <div><span class="badge bg-light text-dark border mt-1">👍 {{ c.upvote_count }} students</span></div>
+                        {% endif %}
                     </td>
 
                     <td>
@@ -169,11 +180,32 @@
                     </td>
 
                     <td>
-                        <span class="complaint-title">{{ c.title }}</span>
+                        <div class="complaint-title">{{ c.title }}</div>
+                        <small class="text-primary fw-semibold">🏢 {{ c.routed_department or 'General Administration' }}</small>
                     </td>
 
                     <td>
-                        <span class="category-label">{{ c.category }}</span>
+                        {% if c.priority == 'High' %}
+                            <span class="badge bg-danger">High / Emergency</span>
+                        {% elif c.priority == 'Low' %}
+                            <span class="badge bg-secondary">Low</span>
+                        {% else %}
+                            <span class="badge bg-info text-dark">Medium</span>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if c.sla_due_at %}
+                            {% set now_str = current_time_str or '' %}
+                            <div class="small fw-semibold {% if c.status in ['Submitted', 'In Progress'] and c.sla_due_at < now_utc %}text-danger{% else %}text-muted{% endif %}">
+                                ⏳ {{ c.sla_due_at.strftime('%d %b %Y, %H:%M') }}
+                            </div>
+                            {% if c.status in ['Submitted', 'In Progress'] and c.sla_due_at < now_utc %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger border border-danger mt-1 font-monospace">OVERDUE</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="text-muted small">N/A</span>
+                        {% endif %}
                     </td>
 
                     <td>
@@ -211,7 +243,7 @@
 
             {% else %}
                 <tr>
-                    <td colspan="6">
+                    <td colspan="7">
                         <div class="empty-state">
                             <div class="empty-state-icon">▤</div>
                             <h3>No complaints yet</h3>
@@ -222,7 +254,7 @@
             {% endfor %}
 
                 <tr id="adminNoMatches" hidden>
-                    <td colspan="6">
+                    <td colspan="7">
                         <div class="empty-state">
                             <div class="empty-state-icon">⌕</div>
                             <h3>No matching complaints found</h3>
@@ -238,4 +270,3 @@
 </div>
 
 {% endblock %}
-

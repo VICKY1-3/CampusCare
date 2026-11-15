@@ -33,17 +33,22 @@ CampusCare
         </a>
 
         {% if session.get('user_id') %}
-        <div class="d-flex align-items-center gap-3">
-            <div class="user-info d-none d-sm-block">
-                <span class="user-name">{{ session.get('name') }}</span>
-                <span class="user-role">{{ session.get('role')|title }}</span>
-            </div>
+<div class="d-flex align-items-center gap-3">
+    <!-- Dark Mode Toggle Button -->
+    <button type="button" id="darkModeToggle" class="btn btn-sm btn-outline-secondary rounded-pill px-3 py-1 d-flex align-items-center gap-2" title="Toggle Dark/Light Mode">
+        <span id="darkModeIcon">🌙</span> <span id="darkModeText" class="small fw-semibold">Dark</span>
+    </button>
 
-            <a class="btn btn-logout" href="{{ url_for('logout') }}">
-                Logout <span aria-hidden="true">↗</span>
-            </a>
-        </div>
-        {% endif %}
+    <div class="user-info d-none d-sm-block">
+        <span class="user-name">{{ session.get('name') }}</span>
+        <span class="user-role">{{ session.get('role')|title }}</span>
+    </div>
+
+    <a class="btn btn-logout" href="{{ url_for('logout') }}">
+        Logout <span aria-hidden="true">↗</span>
+    </a>
+</div>
+{% endif %}
     </div>
 </nav>
 
@@ -223,7 +228,40 @@ document.addEventListener("DOMContentLoaded", function () {
     applyAdminFilters();
 });
 </script>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const toggleBtn = document.getElementById("darkModeToggle");
+    const iconSpan = document.getElementById("darkModeIcon");
+    const textSpan = document.getElementById("darkModeText");
+    const htmlElement = document.documentElement;
 
+    // Check saved theme preference
+    const savedTheme = localStorage.getItem("campuscare_theme") || "light";
+    htmlElement.setAttribute("data-bs-theme", savedTheme);
+    updateToggleUI(savedTheme);
+
+    if (toggleBtn) {
+        toggleBtn.addEventListener("click", function () {
+            const currentTheme = htmlElement.getAttribute("data-bs-theme");
+            const newTheme = currentTheme === "dark" ? "light" : "dark";
+
+            htmlElement.setAttribute("data-bs-theme", newTheme);
+            localStorage.setItem("campuscare_theme", newTheme);
+            updateToggleUI(newTheme);
+        });
+    }
+
+    function updateToggleUI(theme) {
+        if (theme === "dark") {
+            iconSpan.textContent = "☀️";
+            textSpan.textContent = "Light";
+        } else {
+            iconSpan.textContent = "🌙";
+            textSpan.textContent = "Dark";
+        }
+    }
+});
+</script>
 
 </body>
 </html>
