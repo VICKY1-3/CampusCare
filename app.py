@@ -1720,8 +1720,36 @@ def forbidden(error):
     return "Access denied: you do not have permission to view this page.", 403
 
 
+def create_default_admin():
+    """Automatically create a default admin account if none exists."""
+    try:
+        with psycopg.connect(DATABASE_URL) as db:
+            existing = db.execute(
+                "SELECT user_id FROM users WHERE role = 'admin' LIMIT 1"
+            ).fetchone()
+            
+            if not existing:
+                db.execute(
+                    """
+                    INSERT INTO users (name, email, password_hash, role)
+                    VALUES (%s, %s, %s, 'admin')
+                    """,
+                    ("Admin User", "admin@campuscare.com", generate_password_hash("admin12345"))
+                )
+                db.commit()
+                app.logger.info("Default admin account created: admin@campuscare.com / admin12345")
+    except Exception:
+        app.logger.exception("Could not auto-create default admin.")
+
 if __name__ == "__main__":
     init_db()
+    create_default_admin()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
-    
+else:
+    # This runs automatically when Gunicorn starts your app on Render!
+    try:
+        init_db()
+        create_default_admin()
+    except Exception as e:
+        app.logger.error(f"Startup init error: {e}")
