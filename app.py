@@ -1,4 +1,3 @@
-
 import os
 import re
 import psycopg
@@ -64,8 +63,42 @@ DEPARTMENT_RULES = [
     )),
 ]
 
+# Comprehensive High-Severity Keywords List (100+ terms)
+HIGH_SEVERITY_KEYWORDS = [
+    # Ragging, Harassment & Safety
+    "ragging", "harassment", "bullying", "mental torture", "threat", "assault",
+    "violence", "stalking", "abuse", "discrimination", "safety", "hazard",
+    "danger", "risk", "unsafe", "vulnerability", "security breach", "unauthorized entry",
+    
+    # Fire & Electrical Emergencies
+    "fire", "spark", "sparking", "short circuit", "broken electrical", "switchboard",
+    "exposed wire", "live wire", "power failure", "blackout", "transformer blast",
+    "burning smell", "smoke", "malfunctioning socket", "fuse blown",
+    
+    # Water, Sanitation & Biohazards
+    "water contamination", "contaminated", "poison", "toxic", "sewage overflow",
+    "drainage blockage", "stagnant water", "cholera", "disease outbreak",
+    "unclean drinking water", "rotten food", "insect infestation", "pest menace",
+    "biohazard", "hazardous waste", "chemical leak", "gas leak",
+    
+    # Structural Integrity & Collapse Risks
+    "collapse", "structural damage", "cracked wall", "falling ceiling", "roof leak",
+    "broken staircase", "loose balcony", "shattered glass", "blocked emergency exit",
+    "faulty elevator", "stuck lift", "damaged foundation",
+    
+    # Medical & Physical Emergencies
+    "injury", "injured", "accident", "bleeding", "unconscious", "medical emergency",
+    "ambulance", "severe allergic reaction", "food poisoning", "electric shock",
+    "burn", "fracture", "fainting", "suicide threat", "depression crisis",
+    
+    # Critical Campus Incidents & Crimes
+    "theft", "robbery", "burglary", "stolen", "vandalism", "property damage",
+    "weapon", "drugs", "alcohol consumption", "ragging complaint", "extortion",
+    "ragging incident", "emergency", "urgent", "critical", "sos", "immediate action"
+]
+
 HIGH_SEVERITY_PATTERN = re.compile(
-    r"\b(ragging|harassment|safety|hazard|fire|spark|short circuit|broken electrical|switchboard|water contamination|contaminated|toxic|collapse|injury|emergency|urgent|theft)\b",
+    r"\b(" + "|".join(re.escape(term) for term in HIGH_SEVERITY_KEYWORDS) + r")\b",
     re.IGNORECASE
 )
 
@@ -136,13 +169,13 @@ def generate_ai_insights(title, description):
     
     if score >= 2 or "emergency" in text or "ragging" in text:
         sentiment = "High Frustration / Critical"
-        ai_badge = "🔴 Critical Alert"
+        ai_badge = "🚨 Critical Alert"
     elif score == 1:
         sentiment = "Moderate Concern"
-        ai_badge = "🟡 Moderate Attention"
+        ai_badge = "⚠️ Moderate Attention"
     else:
         sentiment = "Standard Inquiry"
-        ai_badge = "🟢 General"
+        ai_badge = "ℹ️ General"
         
     summary = description[:140] + "..." if len(description) > 140 else description
     
@@ -786,7 +819,7 @@ def dashboard():
 
 @app.route("/complaint/new", methods=["GET", "POST"])
 @login_required
-@limiter.limit("5 per hour")
+@limiter.limit("30 per hour")
 def new_complaint():
     if session["role"] != "student":
         abort(403)
@@ -1789,7 +1822,7 @@ def create_default_committee():
 if __name__ == "__main__":
     init_db()
     create_default_admin()
-    create_default_committee()  # <--- Add this here!
+    create_default_committee()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
 else:
@@ -1797,6 +1830,6 @@ else:
     try:
         init_db()
         create_default_admin()
-        create_default_committee()  # <--- Add this here too!
+        create_default_committee()
     except Exception as e:
         app.logger.error(f"Startup init error: {e}")
