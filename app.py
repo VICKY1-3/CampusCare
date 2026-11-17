@@ -1753,10 +1753,42 @@ def create_default_admin():
                 app.logger.info("Default admin account created: admin@campuscare.com / admin12345")
     except Exception:
         app.logger.exception("Could not auto-create default admin.")
-
+def create_default_committee():
+    """Automatically create a default committee account if none exists."""
+    try:
+        with psycopg.connect(DATABASE_URL) as db:
+            existing = db.execute(
+                "SELECT user_id FROM users WHERE email = %s LIMIT 1",
+                ("committee@gmail.com",)
+            ).fetchone()
+            
+            if not existing:
+                row = db.execute(
+                    """
+                    INSERT INTO users (name, email, password_hash, role)
+                    VALUES (%s, %s, %s, 'committee')
+                    RETURNING user_id
+                    """,
+                    ("Committee", "committee@gmail.com", generate_password_hash("committee123"))
+                ).fetchone()
+                
+                user_id = row[0]
+                db.execute(
+                    """
+                    INSERT INTO grievance_officers (user_id, designation, is_active)
+                    VALUES (%s, 'Committee Member', TRUE)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (user_id,)
+                )
+                db.commit()
+                app.logger.info("Default committee account created: committee@gmail.com / committee123")
+    except Exception:
+        app.logger.exception("Could not auto-create default committee.")
 if __name__ == "__main__":
     init_db()
     create_default_admin()
+    create_default_committee()  # <--- Add this here!
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
 else:
@@ -1764,5 +1796,6 @@ else:
     try:
         init_db()
         create_default_admin()
+        create_default_committee()  # <--- Add this here too!
     except Exception as e:
         app.logger.error(f"Startup init error: {e}")
