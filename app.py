@@ -591,7 +591,7 @@ def index():
 
 
 @app.route("/register", methods=["GET", "POST"])
-@limiter.limit("5 per hour")
+@limiter.limit("50 per hour")
 def register():
     if request.method == "POST":
         name = " ".join(
