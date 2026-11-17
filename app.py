@@ -1019,9 +1019,10 @@ def complaint_detail(complaint_id):
     if complaint is None:
         abort(404)
 
-    if (session["role"] == "student"
-            and complaint["user_id"] != session["user_id"]):
-        abort(403)
+    # Allow students to view their own complaints OR any active/submitted public complaint for upvoting
+    if session["role"] == "student":
+        if complaint["user_id"] != session["user_id"] and complaint["status"] not in ("Submitted", "In Progress"):
+            abort(403)
 
     
 
