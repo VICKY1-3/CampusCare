@@ -710,36 +710,49 @@ def login():
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
+        selected_role = request.form.get("role", "student") # Catches student, admin, or committee from the form tab
 
         user = get_db().execute(
-    "SELECT * FROM users WHERE email = %s",
-    (email,)
-).fetchone()
+            "SELECT * FROM users WHERE email = %s",
+            (email,)
+        ).fetchone()
 
         if user and check_password_hash(user["password_hash"], password):
+            actual_role = user["role"]
+
+            # Security check: Ensure the user is logging into their correct designated tab portal
+            if selected_role == "admin" and actual_role != "admin":
+                flash("Access denied: This account is not an Administrator.")
+                return render_template("login.html")
+            
+            if selected_role == "committee" and actual_role != "committee":
+                flash("Access denied: This account is not a Committee member.")
+                return render_template("login.html")
+
+            if selected_role == "student" and actual_role != "student":
+                flash("Admins and Committee must use their respective login tabs.")
+                return render_template("login.html")
+
+            # Login successful, set session variables
             session.clear()
             session["user_id"] = user["user_id"]
             session["name"] = user["name"]
-            session["role"] = user["role"]
+            session["role"] = actual_role
 
-            role = user["role"]
-            print("DEBUG LOGIN:", user["email"], repr(role))
+            print("DEBUG LOGIN:", user["email"], repr(actual_role))
 
-            if role == "admin":
+            # Redirect based on user role dashboard
+            if actual_role == "admin":
                 return redirect(url_for("admin_dashboard"))
-            elif role == "committee":
+            elif actual_role == "committee":
                 return redirect(url_for("committee_dashboard"))
             else:
                 return redirect(url_for("dashboard"))
 
-        
-            
-            
-
         log_security_event(
-        "failed_login",
-        details="Login attempted with invalid credentials"
-         )
+            "failed_login",
+            details="Login attempted with invalid credentials"
+        )
         flash("Invalid email or password.")
 
     return render_template("login.html")
