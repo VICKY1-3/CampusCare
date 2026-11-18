@@ -6,7 +6,6 @@ from functools import wraps
 from datetime import datetime, timedelta
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-
 import click
 from flask import (
     Flask, render_template, request, redirect,
@@ -102,14 +101,49 @@ HIGH_SEVERITY_PATTERN = re.compile(
     re.IGNORECASE
 )
 
+# Comprehensive Low-Severity / General Inquiry Keywords List (100+ terms)
+LOW_SEVERITY_KEYWORDS = [
+    # General Inquiries & Questions
+    "inquiry", "enquiry", "question", "doubt", "clarification", "information",
+    "details", "guidelines", "procedure", "process", "schedule", "timetable",
+    "timing", "calendar", "notification", "circular", "announcement", "updates",
+    
+    # Suggestions & Feedback
+    "suggestion", "feedback", "proposal", "recommendation", "idea", "opinion",
+    "improvement", "enhancement", "upgrade request", "wishlist", "review",
+    "appreciation", "compliment", "comment", "thought",
+    
+    # General Requests & Amenities
+    "request", "general", "optional", "preference", "convenience", "access",
+    "permission", "concession", "pass", "card reissue", "identity card replacement",
+    "locker", "parking space", "bicycle rack", "drinking water station addition",
+    "shade", "seating arrangement", "bench", "lighting adjustment",
+    
+    # Sports, Cultural & Extracurricular
+    "sports equipment", "gym equipment", "cultural event", "fest", "club activity",
+    "society", "competition", "tournament", "practice session", "auditorium booking",
+    "seminar hall", "exhibition", "newsletter", "magazine", "membership",
+    
+    # Administrative Assistance & Minor Adjustments
+    "form submission", "document collection", "certificate copy", "bonafide request",
+    "fee structure doubt", "library card renewal", "book exchange", "reading room seating",
+    "wifi password update", "email alias", "portal assistance", "profile correction",
+    "address update", "contact change", "spelling correction", "minor adjustment",
+    
+    # Non-Urgent Feedback
+    "routine check", "periodic maintenance", "cleaning schedule", "dustbin placement",
+    "signboard", "notice board", "directional board", "campus landscaping",
+    "plant watering", "lawn maintenance", "mosquito repellent check", "general upkeep"
+]
+
 LOW_SEVERITY_PATTERN = re.compile(
-    r"\b(inquiry|enquiry|suggestion|feedback|request|general)\b",
+    r"\b(" + "|".join(re.escape(term) for term in LOW_SEVERITY_KEYWORDS) + r")\b",
     re.IGNORECASE
 )
 
 
 def classify_complaint(title, description, category, requested_priority=""):
-    """Determine department routing, severity score, and SLA deadline."""
+    """Determine department routing, regex severity score, and SLA deadline."""
     combined_text = f"{title} {description}"
 
     # 1. Keyword Auto-Routing (with category fallback)
@@ -132,7 +166,7 @@ def classify_complaint(title, description, category, requested_priority=""):
             category, "General Administration"
         )
 
-    # 2. Regex-Based Severity Scoring (respects explicit High input or detects keywords)
+    # 2. Robust Regex-Based Severity Scoring
     if HIGH_SEVERITY_PATTERN.search(combined_text) or requested_priority == "High":
         priority = "High"
     elif requested_priority in ("Medium", "Low"):
@@ -157,8 +191,10 @@ def extract_keywords(text):
     }
     words = re.findall(r"[a-z0-9\-]{4,}", text.lower())
     return [w for w in words if w not in stopwords]
+
+
 def generate_ai_insights(title, description):
-    """Generate a lightweight heuristic AI summary and sentiment score."""
+    """Generate a lightweight heuristic summary and sentiment badge."""
     text = f"{title} {description}".lower()
     
     frustration_words = [
@@ -185,6 +221,7 @@ def generate_ai_insights(title, description):
         "ai_summary": summary
     }
 
+
 def get_db():
     if "db" not in g:
         if not DATABASE_URL:
@@ -198,6 +235,7 @@ def get_db():
         )
         
     return g.db
+
 
 def log_security_event(event_type, student_id=None, details=None):
     """Record a security event without storing passwords."""
@@ -222,7 +260,6 @@ def log_security_event(event_type, student_id=None, details=None):
             db.commit()
     except psycopg.Error:
         app.logger.exception("Could not save security audit event.")
-
 
 
 @app.teardown_appcontext
@@ -302,7 +339,8 @@ def init_db():
                 updated_at TEXT NOT NULL
             )
         """)
-                # Approved college student roster
+
+        # Approved college student roster
         db.execute("""
             CREATE TABLE IF NOT EXISTS approved_students (
                 student_id TEXT PRIMARY KEY,
@@ -311,20 +349,17 @@ def init_db():
             )
         """)
 
-        # Add student_id to existing users without deleting accounts
         db.execute("""
             ALTER TABLE users
             ADD COLUMN IF NOT EXISTS student_id TEXT
         """)
 
-        # Prevent multiple accounts from using the same student ID
         db.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS
             users_student_id_unique
             ON users (student_id)
         """)
 
-        # Insert the 16 approved students
         approved_students = [
             ("colaamna", "Aamna"),
             ("colabhishek", "Abhishek Dewangan"),
@@ -344,7 +379,6 @@ def init_db():
             ("colvivek", "Vivek Yadav"),
         ]
 
-        # Record security-related events
         db.execute("""
             CREATE TABLE IF NOT EXISTS security_audit_logs (
                 log_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -356,7 +390,6 @@ def init_db():
             )
         """)
 
-
         db.cursor().executemany("""
             INSERT INTO approved_students
                 (student_id, student_name)
@@ -365,10 +398,6 @@ def init_db():
             DO UPDATE SET student_name = EXCLUDED.student_name
         """, approved_students)
 
-
-        # Complaint escalation records
-        
-        
         db.execute("""
             CREATE TABLE IF NOT EXISTS complaint_escalations (
                 escalation_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -396,7 +425,6 @@ def init_db():
             ADD COLUMN IF NOT EXISTS action_completed BOOLEAN NOT NULL DEFAULT TRUE
         """)
 
-        # Authorized grievance officers and committee members
         db.execute("""
             CREATE TABLE IF NOT EXISTS grievance_officers (
                 officer_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -409,7 +437,6 @@ def init_db():
             )
         """)
 
-        # History of escalation actions and decisions
         db.execute("""
             CREATE TABLE IF NOT EXISTS escalation_history (
                 history_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -422,7 +449,6 @@ def init_db():
             )
         """)
 
-        # Speed up escalation lookups
         db.execute("""
             CREATE INDEX IF NOT EXISTS idx_escalations_complaint
             ON complaint_escalations(complaint_id)
@@ -434,16 +460,15 @@ def init_db():
         """)
 
         db.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS
-        idx_escalations_one_active_per_complaint
-        ON complaint_escalations(complaint_id)
-        WHERE status IN (
-            'Pending',
-            'Under Review',
-            'Referred to Committee'
-        )
-    """)
-
+            CREATE UNIQUE INDEX IF NOT EXISTS
+            idx_escalations_one_active_per_complaint
+            ON complaint_escalations(complaint_id)
+            WHERE status IN (
+                'Pending',
+                'Under Review',
+                'Referred to Committee'
+            )
+        """)
 
 
 @app.cli.command("init-db")
@@ -451,7 +476,6 @@ def init_db_command():
     """Create the database tables."""
     init_db()
     click.echo("Database initialized.")
-
 
 
 @app.cli.command("create-admin")
@@ -488,6 +512,7 @@ def create_admin_command():
         raise click.ClickException(
             "That email is already registered."
         )
+
 
 @app.cli.command("create-grievance-account")
 def create_grievance_account_command():
@@ -547,7 +572,6 @@ def create_grievance_account_command():
         )
 
 
-
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -570,7 +594,6 @@ def admin_required(view):
     return wrapped
 
 
-
 def committee_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -578,7 +601,6 @@ def committee_required(view):
             flash("Please log in first.")
             return redirect(url_for("login"))
 
-        
         if session.get("role") != "committee":
             app.logger.warning(
                 "Committee access denied: session role=%r",
@@ -609,8 +631,6 @@ def committee_required(view):
     return wrapped
 
 
-
-
 @app.route("/")
 def index():
     if "user_id" not in session:
@@ -620,7 +640,6 @@ def index():
     if session["role"] == "committee":
         return redirect(url_for("committee_dashboard"))
     return redirect(url_for("dashboard"))
-
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -653,7 +672,6 @@ def register():
         db = get_db()
 
         try:
-            # Lock the roster entry so two requests cannot claim it together.
             student = db.execute(
                 """
                 SELECT student_id, student_name, is_registered
@@ -667,24 +685,23 @@ def register():
             if student is None:
                 db.rollback()
                 log_security_event(
-               "invalid_student_id",
-                student_id=student_id,
-                details="Registration attempted with an unapproved student ID"
-    ) 
+                    "invalid_student_id",
+                    student_id=student_id,
+                    details="Registration attempted with an unapproved student ID"
+                ) 
                 flash("This student ID is not on the approved college list.")
                 return render_template("register.html")
 
             if " ".join(student["student_name"].casefold().split()) != name.casefold():
                 db.rollback()
                 log_security_event(
-                 "student_name_mismatch",
-                 student_id=student_id,
-                details="Registration name did not match the approved student record"
-)
+                    "student_name_mismatch",
+                    student_id=student_id,
+                    details="Registration name did not match the approved student record"
+                )
                 flash("The name does not match the approved student record.")
                 return render_template("register.html")
 
-            
             if student["is_registered"]:
                 db.rollback()
                 log_security_event(
@@ -695,8 +712,6 @@ def register():
                 flash("This college student ID has already been registered.")
                 return render_template("register.html")
 
-
-            # Claim the approved ID and create the account in one transaction.
             db.execute(
                 """
                 UPDATE approved_students
@@ -736,14 +751,13 @@ def register():
     return render_template("register.html")
 
 
-
 @app.route("/login", methods=["GET", "POST"])
 @limiter.limit("5 per minute")
 def login():
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
-        selected_role = request.form.get("role", "student") # Catches student, admin, or committee from the form tab
+        selected_role = request.form.get("role", "student")
 
         user = get_db().execute(
             "SELECT * FROM users WHERE email = %s",
@@ -753,7 +767,6 @@ def login():
         if user and check_password_hash(user["password_hash"], password):
             actual_role = user["role"]
 
-            # Security check: Ensure the user is logging into their correct designated tab portal
             if selected_role == "admin" and actual_role != "admin":
                 flash("Access denied: This account is not an Administrator.")
                 return render_template("login.html")
@@ -766,15 +779,11 @@ def login():
                 flash("Admins and Committee must use their respective login tabs.")
                 return render_template("login.html")
 
-            # Login successful, set session variables
             session.clear()
             session["user_id"] = user["user_id"]
             session["name"] = user["name"]
             session["role"] = actual_role
 
-            print("DEBUG LOGIN:", user["email"], repr(actual_role))
-
-            # Redirect based on user role dashboard
             if actual_role == "admin":
                 return redirect(url_for("admin_dashboard"))
             elif actual_role == "committee":
@@ -840,7 +849,6 @@ def new_complaint():
             flash("Title or description is too long.")
             return render_template("new_complaint.html", categories=CATEGORIES)
 
-        # 1. Check for similar duplicate complaints in the last 24 hours
         if not bypass_duplicate:
             recent_complaints = db.execute(
                 """
@@ -860,7 +868,7 @@ def new_complaint():
             for existing in recent_complaints:
                 existing_keywords = set(extract_keywords(f"{existing['title']} {existing['description']}"))
                 common = new_keywords.intersection(existing_keywords)
-                if len(common) >= 2:  # 2 or more shared significant keywords
+                if len(common) >= 2:
                     matched_ticket = existing
                     break
 
@@ -877,7 +885,6 @@ def new_complaint():
                     }
                 )
 
-        # 2. Run Auto-Routing, Severity Scoring & SLA Calculation
         routed_dept, priority, sla_due_at = classify_complaint(
             title, description, category, requested_priority
         )
@@ -896,7 +903,6 @@ def new_complaint():
         )
         complaint_id = cur.fetchone()["complaint_id"]
 
-        # Record author's initial upvote
         db.execute(
             """
             INSERT INTO complaint_upvotes (complaint_id, user_id)
@@ -911,6 +917,8 @@ def new_complaint():
         return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
     return render_template("new_complaint.html", categories=CATEGORIES)
+
+
 @app.route("/complaint/<int:complaint_id>/upvote", methods=["POST"])
 @login_required
 def upvote_complaint(complaint_id):
@@ -953,6 +961,7 @@ def upvote_complaint(complaint_id):
         flash("Could not process upvote. Please try again.")
 
     return redirect(url_for("complaint_detail", complaint_id=complaint_id))
+
 
 @app.route("/complaint/<int:complaint_id>/escalate", methods=["POST"])
 @login_required
@@ -1040,6 +1049,8 @@ def request_escalation(complaint_id):
     return redirect(
         url_for("complaint_detail", complaint_id=complaint_id)
     )
+
+
 @app.route("/complaint/<int:complaint_id>")
 @login_required
 def complaint_detail(complaint_id):
@@ -1052,14 +1063,10 @@ def complaint_detail(complaint_id):
     if complaint is None:
         abort(404)
 
-    # Allow students to view their own complaints OR any active/submitted public complaint for upvoting
     if session["role"] == "student":
         if complaint["user_id"] != session["user_id"] and complaint["status"] not in ("Submitted", "In Progress"):
             abort(403)
 
-    
-
-    
     updates = db.execute(
         """SELECT complaint_updates.*, users.name AS admin_name
            FROM complaint_updates
@@ -1068,6 +1075,7 @@ def complaint_detail(complaint_id):
            ORDER BY complaint_updates.update_id ASC""",
         (complaint_id,)
     ).fetchall()
+
     committee_members = db.execute("""
         SELECT u.user_id, u.name, u.email
         FROM grievance_officers AS go
@@ -1077,6 +1085,7 @@ def complaint_detail(complaint_id):
           AND u.role = 'committee'
         ORDER BY u.name
     """).fetchall()
+
     active_escalation = db.execute(
         """
         SELECT
@@ -1116,7 +1125,6 @@ def complaint_detail(complaint_id):
         (complaint_id,)
     ).fetchall()
 
-    # Generate lightweight AI insights
     ai_insights = generate_ai_insights(complaint["title"], complaint["description"])
 
     return render_template(
@@ -1136,7 +1144,6 @@ def complaint_detail(complaint_id):
 def admin_analytics():
     db = get_db()
 
-    # Complaint counts by status
     status_rows = db.execute(
         """SELECT status, COUNT(*) AS total
            FROM complaints
@@ -1146,7 +1153,6 @@ def admin_analytics():
     status_labels = [row["status"] for row in status_rows]
     status_values = [row["total"] for row in status_rows]
 
-    # Complaint counts by category
     category_rows = db.execute(
         """SELECT category, COUNT(*) AS total
            FROM complaints
@@ -1157,8 +1163,6 @@ def admin_analytics():
     category_labels = [row["category"] for row in category_rows]
     category_values = [row["total"] for row in category_rows]
 
-    # Monthly complaint submissions for the last 6 months,
-    # including months with zero complaints.
     from datetime import date
     from calendar import month_abbr
 
@@ -1182,18 +1186,13 @@ def admin_analytics():
 
     for year, month in months:
         month_key = f"{year:04d}-{month:02d}"
-
-       
         total = db.execute(
             """SELECT COUNT(*) FROM complaints
                WHERE substring(created_at FROM 1 FOR 7) = %s""",
             (month_key,)
         ).fetchone()["count"]
-
-
         monthly_values.append(total)
 
-    # Summary figures
     total_complaints = db.execute(
         "SELECT COUNT(*) FROM complaints"
     ).fetchone()["count"]
@@ -1225,6 +1224,7 @@ def admin_analytics():
         monthly_labels=monthly_labels,
         monthly_values=monthly_values,
     )
+
 
 @app.route("/admin")
 @admin_required
@@ -1259,13 +1259,11 @@ def admin_dashboard():
     )
 
 
-
 @app.route("/committee/dashboard")
 @committee_required
 def committee_dashboard():
     db = get_db()
 
-    
     escalations = db.execute(
         """
         SELECT
@@ -1287,16 +1285,13 @@ def committee_dashboard():
         (session["user_id"],)
     ).fetchall()
 
-
     return render_template(
         "committee_dashboard.html",
         escalations=escalations
     )
 
 
-
-@app.route("/admin/complaint/<int:complaint_id>/update",
-           methods=["POST"])
+@app.route("/admin/complaint/<int:complaint_id>/update", methods=["POST"])
 @admin_required
 def update_complaint(complaint_id):
     status = request.form.get("status", "")
@@ -1328,14 +1323,10 @@ def update_complaint(complaint_id):
     )
     db.commit()
     flash(f"Complaint CMP-{complaint_id:05d} updated.")
-    return redirect(url_for("complaint_detail",
-                            complaint_id=complaint_id))
+    return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
 
-@app.route(
-    "/admin/complaint/<int:complaint_id>/escalate",
-    methods=["POST"]
-)
+@app.route("/admin/complaint/<int:complaint_id>/escalate", methods=["POST"])
 @admin_required
 def escalate_complaint(complaint_id):
     db = get_db()
@@ -1345,15 +1336,11 @@ def escalate_complaint(complaint_id):
 
     if not reason or len(reason) > 1000:
         flash("Please provide an escalation reason (maximum 1000 characters).")
-        return redirect(
-            url_for("complaint_detail", complaint_id=complaint_id)
-        )
+        return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
     if not assigned_to_raw.isdigit():
         flash("Please select a valid committee member.")
-        return redirect(
-            url_for("complaint_detail", complaint_id=complaint_id)
-        )
+        return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
     assigned_to = int(assigned_to_raw)
 
@@ -1380,9 +1367,7 @@ def escalate_complaint(complaint_id):
 
     if committee_member is None:
         flash("The selected committee member is not active.")
-        return redirect(
-            url_for("complaint_detail", complaint_id=complaint_id)
-        )
+        return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
     try:
         existing = db.execute(
@@ -1401,9 +1386,7 @@ def escalate_complaint(complaint_id):
 
         if existing:
             flash("This complaint already has an active escalation.")
-            return redirect(
-                url_for("complaint_detail", complaint_id=complaint_id)
-            )
+            return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
         escalation = db.execute(
             """
@@ -1453,13 +1436,10 @@ def escalate_complaint(complaint_id):
         app.logger.exception("Failed to escalate complaint %s", complaint_id)
         flash("Could not escalate the complaint. Please try again.")
 
-    return redirect(
-        url_for("complaint_detail", complaint_id=complaint_id)
-    )
-@app.route(
-    "/admin/escalation/<int:escalation_id>/review",
-    methods=["POST"]
-)
+    return redirect(url_for("complaint_detail", complaint_id=complaint_id))
+
+
+@app.route("/admin/escalation/<int:escalation_id>/review", methods=["POST"])
 @admin_required
 def review_escalation(escalation_id):
     db = get_db()
@@ -1480,27 +1460,21 @@ def review_escalation(escalation_id):
 
     if escalation["status"] != "Pending":
         flash("Only pending escalation requests can be reviewed.")
-        return redirect(
-            url_for("complaint_detail", complaint_id=complaint_id)
-        )
+        return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
     decision = request.form.get("decision", "").strip()
     notes = request.form.get("notes", "").strip()
 
     if len(notes) > 1000:
         flash("Remarks must be 1000 characters or fewer.")
-        return redirect(
-            url_for("complaint_detail", complaint_id=complaint_id)
-        )
+        return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
     try:
         if decision == "accept":
             assigned_to_raw = request.form.get("assigned_to", "").strip()
             if not assigned_to_raw.isdigit():
                 flash("Please select a valid committee member.")
-                return redirect(
-                    url_for("complaint_detail", complaint_id=complaint_id)
-                )
+                return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
             assigned_to = int(assigned_to_raw)
             member = db.execute(
@@ -1518,9 +1492,7 @@ def review_escalation(escalation_id):
 
             if member is None:
                 flash("The selected committee member is not active.")
-                return redirect(
-                    url_for("complaint_detail", complaint_id=complaint_id)
-                )
+                return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
             db.execute(
                 """
@@ -1550,9 +1522,7 @@ def review_escalation(escalation_id):
         elif decision == "reject":
             if not notes:
                 flash("Please provide a reason for rejecting the escalation request.")
-                return redirect(
-                    url_for("complaint_detail", complaint_id=complaint_id)
-                )
+                return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
             db.execute(
                 """
@@ -1576,9 +1546,7 @@ def review_escalation(escalation_id):
 
         else:
             flash("Invalid review decision.")
-            return redirect(
-                url_for("complaint_detail", complaint_id=complaint_id)
-            )
+            return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
         db.commit()
 
@@ -1587,13 +1555,10 @@ def review_escalation(escalation_id):
         app.logger.exception("Failed to review escalation %s", escalation_id)
         flash("Could not process the escalation review. Please try again.")
 
-    return redirect(
-        url_for("complaint_detail", complaint_id=complaint_id)
-    )
-@app.route(
-    "/committee/escalation/<int:escalation_id>/update",
-    methods=["POST"]
-)
+    return redirect(url_for("complaint_detail", complaint_id=complaint_id))
+
+
+@app.route("/committee/escalation/<int:escalation_id>/update", methods=["POST"])
 @committee_required
 def committee_update_escalation(escalation_id):
     db = get_db()
@@ -1619,10 +1584,7 @@ def committee_update_escalation(escalation_id):
 
     try:
         if action == "review":
-            if current_status not in (
-                "Pending",
-                "Referred to Committee"
-            ):
+            if current_status not in ("Pending", "Referred to Committee"):
                 flash("This escalation cannot be moved to review.")
                 return redirect(url_for("committee_dashboard"))
 
@@ -1646,11 +1608,7 @@ def committee_update_escalation(escalation_id):
             decision = request.form.get("decision", "").strip()
             remarks = request.form.get("remarks", "").strip()
 
-            allowed_decisions = {
-                "Action Required",
-                "Rejected",
-                "Resolved"
-            }
+            allowed_decisions = {"Action Required", "Rejected", "Resolved"}
 
             if decision not in allowed_decisions:
                 flash("Please select a valid committee decision.")
@@ -1758,9 +1716,11 @@ def committee_update_escalation(escalation_id):
 
     return redirect(url_for("committee_dashboard"))
 
+
 @app.errorhandler(429)
 def ratelimit_handler(error):
     return render_template("429.html"), 429
+
 
 @app.errorhandler(403)
 def forbidden(error):
@@ -1787,6 +1747,8 @@ def create_default_admin():
                 app.logger.info("Default admin account created: admin@campuscare.com / admin12345")
     except Exception:
         app.logger.exception("Could not auto-create default admin.")
+
+
 def create_default_committee():
     """Automatically create a default committee account if none exists."""
     try:
@@ -1819,6 +1781,8 @@ def create_default_committee():
                 app.logger.info("Default committee account created: committee@gmail.com / committee123")
     except Exception:
         app.logger.exception("Could not auto-create default committee.")
+
+
 if __name__ == "__main__":
     init_db()
     create_default_admin()
@@ -1826,7 +1790,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
 else:
-    # This runs automatically when Gunicorn starts your app on Render!
     try:
         init_db()
         create_default_admin()
