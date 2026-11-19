@@ -1,5 +1,3 @@
-
-
 {% extends "base.html" %}
 
 {% block title %}Register | CampusCare{% endblock %}
@@ -122,5 +120,20 @@
 
     </div>
 </div>
-{% endblock %}
 
+<script>
+document.querySelectorAll("[data-password-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+        const targetId = button.getAttribute("data-password-toggle");
+        const input = document.getElementById(targetId);
+        if (!input) return;
+
+        const isHidden = input.type === "password";
+        input.type = isHidden ? "text" : "password";
+        button.textContent = isHidden ? "Hide" : "Show";
+        button.setAttribute("aria-pressed", String(isHidden));
+        button.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
+    });
+});
+</script>
+{% endblock %}

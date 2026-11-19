@@ -1083,3 +1083,38 @@ body {
 body, .content-card, .complaint-form-card, .form-control, .form-select, .summary-card {
     transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
+/* Style .toggle-password inside Bootstrap .input-group on login page */
+.input-group .toggle-password {
+    color: #2563eb;
+    font-size: 0.85rem;
+    font-weight: 700;
+    border-color: #dbe3ef;
+}
+
+.input-group .toggle-password:hover {
+    background-color: #eff6ff;
+    border-color: #2563eb;
+    color: #1d4ed8;
+}
+
+/* Dark mode support for login card, tabs, and toggle buttons */
+[data-bs-theme="dark"] .card {
+    background-color: #1e293b !important;
+    border-color: #334155 !important;
+}
+
+[data-bs-theme="dark"] #loginTabs {
+    background-color: #0f172a !important;
+}
+
+[data-bs-theme="dark"] .password-toggle,
+[data-bs-theme="dark"] .input-group .toggle-password {
+    color: #60a5fa;
+    border-color: #334155;
+}
+
+[data-bs-theme="dark"] .password-toggle:hover,
+[data-bs-theme="dark"] .input-group .toggle-password:hover {
+    background-color: #1e293b;
+    color: #93c5fd;
+}
