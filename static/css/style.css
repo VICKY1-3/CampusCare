@@ -1168,6 +1168,29 @@ body {
     }
 }
 
+/* ===== Navbar & Footer Polish ===== */
+
+.campus-navbar {
+    padding: 12px 0;
+}
+
+.campus-footer {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    margin-top: 32px;
+    padding: 20px 12px 28px;
+    color: var(--cc-text-muted);
+    font-size: 0.82rem;
+    text-align: center;
+}
+
+.committee-decision-box {
+    background-color: #f8fafc;
+}
+
 /* ===== Polished Dark Mode Theme Overrides ===== */
 
 [data-bs-theme="dark"] {
@@ -1228,6 +1251,7 @@ body {
 [data-bs-theme="dark"] .detail-submitted,
 [data-bs-theme="dark"] .timeline-remark,
 [data-bs-theme="dark"] .complaint-table thead th,
+[data-bs-theme="dark"] .committee-decision-box,
 [data-bs-theme="dark"] #loginTabs,
 [data-bs-theme="dark"] #loginTabs.bg-light {
     background-color: #0f172a !important;
@@ -1287,20 +1311,35 @@ body {
     color: #ffffff !important;
 }
 
-[data-bs-theme="dark"] .password-toggle,
+[data-bs-theme="dark"] .password-toggle {
+    background-color: transparent !important;
+    border-color: transparent !important;
+    color: #60a5fa !important;
+}
+
+[data-bs-theme="dark"] .password-toggle:hover {
+    background-color: transparent !important;
+    color: #93c5fd !important;
+}
+
 [data-bs-theme="dark"] .input-group .toggle-password {
     background-color: #0f172a !important;
     color: #60a5fa !important;
     border-color: #334155 !important;
 }
 
-[data-bs-theme="dark"] .password-toggle:hover,
 [data-bs-theme="dark"] .input-group .toggle-password:hover {
     background-color: #1e293b !important;
     color: #93c5fd !important;
 }
 
+[data-bs-theme="dark"] .user-role.badge {
+    background-color: #0f172a !important;
+    color: #cbd5e1 !important;
+    border-color: #334155 !important;
+}
+
 /* Smooth transition for theme switching */
-body, .card, .auth-card, .content-card, .complaint-form-card, .form-control, .form-select, .summary-card, .timeline-event {
+body, .card, .auth-card, .form-card, .content-card, .complaint-form-card, .summary-card, .timeline-event {
     transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
 }

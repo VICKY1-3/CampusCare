@@ -36,7 +36,7 @@
                         <span class="badge bg-info text-dark">Medium Priority</span>
                     {% endif %}
                     {% if complaint.upvote_count > 1 %}
-                        <span class="badge bg-light text-dark border">👍 {{ complaint.upvote_count }} students affected</span>
+                        <span class="badge bg-body text-body border">👍 {{ complaint.upvote_count }} students affected</span>
                     {% endif %}
                 </div>
                 <h2 class="detail-complaint-title mt-2">
@@ -74,7 +74,7 @@
         </div>
 
         {% if complaint.sla_due_at %}
-        <div class="px-4 py-2 bg-light border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div class="px-4 py-2 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2">
             <span class="small text-muted">
                 ⏳ <strong>Target SLA Due:</strong> {{ complaint.sla_due_at.strftime('%d %b %Y, %H:%M') }}
             </span>
@@ -85,13 +85,14 @@
             {% endif %}
         </div>
         {% endif %}
+
         <!-- AI Smart Insights Box -->
         <div class="px-4 py-3 bg-primary bg-opacity-10 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2">
             <div>
                 <span class="badge bg-primary me-2">✨ CampusCare AI Assistant</span>
-                <span class="small fw-semibold text-dark">Sentiment Analysis: {{ ai_insights.sentiment }}</span>
+                <span class="small fw-semibold">Sentiment Analysis: {{ ai_insights.sentiment }}</span>
             </div>
-            <span class="badge bg-white text-dark border">{{ ai_insights.badge }}</span>
+            <span class="badge bg-body text-body border">{{ ai_insights.badge }}</span>
         </div>
 
         <div class="detail-description">
@@ -151,7 +152,7 @@
                 </div>
             </div>
 
-           <!-- Saved admin updates -->
+            <!-- Saved admin updates -->
             {% for u in updates %}
             <div class="timeline-item
                 {% if u.status == 'Resolved' %}timeline-resolved
@@ -233,8 +234,8 @@
         </div>
     </div>
 
-    <!-- Student escalation request -->
-    {% if session.get('role') == 'student' %}
+    <!-- Student escalation request (only shown for open complaints or active escalations) -->
+    {% if session.get('role') == 'student' and (active_escalation or complaint.status in ['Submitted', 'In Progress']) %}
     <div class="content-card admin-update-card mb-4">
         <div class="content-card-header">
             <div>

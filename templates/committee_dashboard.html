@@ -1,4 +1,3 @@
-
 {% extends "base.html" %}
 
 {% block title %}Committee Dashboard | CampusCare{% endblock %}
@@ -92,12 +91,12 @@
             <thead>
                 <tr>
                     <th>Escalation</th>
-                    <th>Complaint</th>
+                    <th style="min-width: 220px;">Complaint</th>
                     <th>Student</th>
                     <th>Category</th>
                     <th>Complaint Status</th>
                     <th>Escalation Status</th>
-                    <th style="min-width: 240px;">Reason</th>
+                    <th style="min-width: 220px;">Reason</th>
                     <th style="min-width: 220px;">Actions</th>
                 </tr>
             </thead>
@@ -195,7 +194,7 @@
                             {% if item.status == 'Under Review' %}
                             <form method="POST"
                                   action="{{ url_for('committee_update_escalation', escalation_id=item.escalation_id) }}"
-                                  class="p-2 border rounded bg-light">
+                                  class="p-2 border rounded committee-decision-box">
                                 <label class="form-label small fw-bold mb-1">Decision</label>
                                 <select name="decision" class="form-select form-select-sm mb-2" required>
                                     <option value="">Select decision</option>

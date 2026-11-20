@@ -1,5 +1,3 @@
-
-
 {% extends "base.html" %}
 
 {% block title %}Student Dashboard | CampusCare{% endblock %}
@@ -73,67 +71,72 @@
 <!-- Complaints table -->
 <div class="content-card">
 
-   
-<div class="content-card-header">
-    <div>
-        <h2 class="content-title">My Complaints</h2>
-        <p class="text-muted mb-0">View your submissions and current status.</p>
+    <div class="content-card-header">
+        <div>
+            <h2 class="content-title">My Complaints</h2>
+            <p class="text-muted mb-0">View your submissions and current status.</p>
+        </div>
+
+        <span class="total-pill" id="complaintCount">
+            {{ complaints|length }} total
+        </span>
     </div>
 
-    <span class="total-pill" id="complaintCount">
-        {{ complaints|length }} total
-    </span>
-</div>
+    <!-- Search and filters -->
+    <div class="complaint-filters">
+        <div class="filter-search">
+            <label for="complaintSearch" class="visually-hidden">
+                Search complaints
+            </label>
+            <input
+                type="search"
+                id="complaintSearch"
+                class="form-control"
+                placeholder="Search by title or reference..."
+                autocomplete="off">
+        </div>
 
-<!-- Search and filters -->
-<div class="complaint-filters">
-    <div class="filter-search">
-        <label for="complaintSearch" class="visually-hidden">
-            Search complaints
-        </label>
-        <input
-            type="search"
-            id="complaintSearch"
-            class="form-control"
-            placeholder="Search by title or reference..."
-            autocomplete="off">
+        <div class="filter-select">
+            <label for="statusFilter" class="visually-hidden">
+                Filter by status
+            </label>
+            <select id="statusFilter" class="form-select">
+                <option value="">All statuses</option>
+                <option value="Submitted">Submitted</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Resolved">Resolved</option>
+                <option value="Rejected">Rejected</option>
+            </select>
+        </div>
+
+        <div class="filter-select">
+            <label for="categoryFilter" class="visually-hidden">
+                Filter by category
+            </label>
+            <select id="categoryFilter" class="form-select">
+                <option value="">All categories</option>
+                {% for category in complaints|map(attribute='category')|unique|sort %}
+                <option value="{{ category }}">{{ category }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <button type="button" id="resetComplaintFilters"
+                class="btn btn-outline-secondary">
+            Reset
+        </button>
     </div>
 
-    <div class="filter-select">
-        <label for="statusFilter" class="visually-hidden">
-            Filter by status
-        </label>
-        <select id="statusFilter" class="form-select">
-            <option value="">All statuses</option>
-            <option value="Submitted">Submitted</option>
-            <option value="In Progress">In Progress</option>
-            <option value="Resolved">Resolved</option>
-            <option value="Rejected">Rejected</option>
-        </select>
+    <div class="filter-chips" role="group" aria-label="Quick status filters">
+        <button type="button" class="filter-chip active" data-chip-status="">All</button>
+        <button type="button" class="filter-chip" data-chip-status="Submitted">Submitted</button>
+        <button type="button" class="filter-chip" data-chip-status="In Progress">In Progress</button>
+        <button type="button" class="filter-chip" data-chip-status="Resolved">Resolved</button>
     </div>
 
-    <div class="filter-select">
-        <label for="categoryFilter" class="visually-hidden">
-            Filter by category
-        </label>
-        <select id="categoryFilter" class="form-select">
-            <option value="">All categories</option>
-            {% for category in complaints|map(attribute='category')|unique|sort %}
-            <option value="{{ category }}">{{ category }}</option>
-            {% endfor %}
-        </select>
+    <div class="filter-results-text" id="filterResultsText" aria-live="polite">
+        Showing {{ complaints|length }} complaints
     </div>
-
-    <button type="button" id="resetComplaintFilters"
-            class="btn btn-outline-secondary">
-        Reset
-    </button>
-</div>
-
-<div class="filter-results-text" id="filterResultsText" aria-live="polite">
-    Showing {{ complaints|length }} complaints
-</div>
-
 
     <div class="table-responsive">
         <table class="table complaint-table mb-0">
@@ -142,6 +145,7 @@
                     <th>Reference</th>
                     <th>Complaint</th>
                     <th>Category</th>
+                    <th>Priority</th>
                     <th>Status</th>
                     <th>Submitted</th>
                     <th>Action</th>
@@ -149,13 +153,12 @@
             </thead>
 
             <tbody>
-            
-{% for c in complaints %}
-    <tr class="complaint-row"
-        data-title="{{ c.title|lower }}"
-        data-reference="CMP-{{ '%05d'|format(c.complaint_id) }}"
-        data-status="{{ c.status }}"
-        data-category="{{ c.category }}">
+            {% for c in complaints %}
+                <tr class="complaint-row"
+                    data-title="{{ c.title|lower }}"
+                    data-reference="CMP-{{ '%05d'|format(c.complaint_id) }}"
+                    data-status="{{ c.status }}"
+                    data-category="{{ c.category }}">
 
                     <td>
                         <span class="reference-number">
@@ -169,6 +172,16 @@
 
                     <td>
                         <span class="category-label">{{ c.category }}</span>
+                    </td>
+
+                    <td>
+                        {% if c.priority == 'High' %}
+                            <span class="priority-badge priority-high">High</span>
+                        {% elif c.priority == 'Low' %}
+                            <span class="priority-badge priority-low">Low</span>
+                        {% else %}
+                            <span class="priority-badge priority-medium">Medium</span>
+                        {% endif %}
                     </td>
 
                     <td>
@@ -210,7 +223,7 @@
 
             {% else %}
                 <tr>
-                    <td colspan="6">
+                    <td colspan="7">
                         <div class="empty-state">
                             <div class="empty-state-icon">▤</div>
                             <h3>No complaints yet</h3>
@@ -229,5 +242,33 @@
 
 </div>
 
-{% endblock %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const statusSelect = document.getElementById("statusFilter");
+    const chips = Array.from(document.querySelectorAll(".filter-chip"));
+    const resetBtn = document.getElementById("resetComplaintFilters");
 
+    if (!statusSelect || !chips.length) return;
+
+    function syncChips() {
+        chips.forEach((chip) => {
+            chip.classList.toggle("active", chip.dataset.chipStatus === statusSelect.value);
+        });
+    }
+
+    chips.forEach((chip) => {
+        chip.addEventListener("click", function () {
+            statusSelect.value = chip.dataset.chipStatus;
+            statusSelect.dispatchEvent(new Event("change"));
+            syncChips();
+        });
+    });
+
+    statusSelect.addEventListener("change", syncChips);
+    if (resetBtn) {
+        resetBtn.addEventListener("click", () => setTimeout(syncChips, 0));
+    }
+});
+</script>
+
+{% endblock %}

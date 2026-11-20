@@ -1,4 +1,3 @@
-
 {% extends "base.html" %}
 
 {% block title %}Admin Analytics | CampusCare{% endblock %}
@@ -14,9 +13,9 @@
         </p>
     </div>
 
-    <a href="/admin" class="btn btn-outline-secondary">
-    ← Back to Admin Dashboard
-</a>
+    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary">
+        ← Back to Admin Dashboard
+    </a>
 </div>
 
 <!-- Summary cards -->
@@ -120,6 +119,7 @@
                 aria-label="Line chart of monthly complaint submissions"></canvas>
     </div>
 </div>
+
 <div
     id="analytics-data"
     data-status-labels='{{ status_labels|tojson|forceescape }}'
@@ -134,14 +134,14 @@
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
-   const chartData = document.getElementById("analytics-data");
+    const chartData = document.getElementById("analytics-data");
 
-const statusLabels = JSON.parse(chartData.dataset.statusLabels);
-const statusValues = JSON.parse(chartData.dataset.statusValues);
-const categoryLabels = JSON.parse(chartData.dataset.categoryLabels);
-const categoryValues = JSON.parse(chartData.dataset.categoryValues);
-const monthlyLabels = JSON.parse(chartData.dataset.monthlyLabels);
-const monthlyValues = JSON.parse(chartData.dataset.monthlyValues);
+    const statusLabels = JSON.parse(chartData.dataset.statusLabels);
+    const statusValues = JSON.parse(chartData.dataset.statusValues);
+    const categoryLabels = JSON.parse(chartData.dataset.categoryLabels);
+    const categoryValues = JSON.parse(chartData.dataset.categoryValues);
+    const monthlyLabels = JSON.parse(chartData.dataset.monthlyLabels);
+    const monthlyValues = JSON.parse(chartData.dataset.monthlyValues);
 
     const statusCanvas = document.getElementById("statusChart");
     const categoryCanvas = document.getElementById("categoryChart");
@@ -160,11 +160,45 @@ const monthlyValues = JSON.parse(chartData.dataset.monthlyValues);
         return;
     }
 
+    const charts = [];
+
+    function getChartPalette() {
+        const isDark = document.documentElement.getAttribute("data-bs-theme") === "dark";
+        return {
+            textColor: isDark ? "#cbd5e1" : "#475569",
+            gridColor: isDark ? "rgba(148, 163, 184, 0.16)" : "rgba(15, 23, 42, 0.08)",
+            doughnutBorder: isDark ? "#1e293b" : "#ffffff"
+        };
+    }
+
+    function applyChartTheme() {
+        const palette = getChartPalette();
+        charts.forEach(function (chart) {
+            if (chart.options.plugins?.legend?.labels) {
+                chart.options.plugins.legend.labels.color = palette.textColor;
+            }
+            if (chart.options.scales?.x) {
+                chart.options.scales.x.ticks.color = palette.textColor;
+                chart.options.scales.x.grid.color = palette.gridColor;
+            }
+            if (chart.options.scales?.y) {
+                chart.options.scales.y.ticks.color = palette.textColor;
+                chart.options.scales.y.grid.color = palette.gridColor;
+            }
+            if (chart.config.type === "doughnut" && chart.data.datasets[0]) {
+                chart.data.datasets[0].borderColor = palette.doughnutBorder;
+            }
+            chart.update();
+        });
+    }
+
+    const initialPalette = getChartPalette();
+
     if (statusValues.reduce((sum, value) => sum + value, 0) === 0) {
         document.getElementById("statusEmpty").hidden = false;
         statusCanvas.hidden = true;
     } else {
-        new Chart(statusCanvas, {
+        charts.push(new Chart(statusCanvas, {
             type: "doughnut",
             data: {
                 labels: statusLabels,
@@ -174,7 +208,7 @@ const monthlyValues = JSON.parse(chartData.dataset.monthlyValues);
                         "#fbbf24", "#6366f1", "#22c55e", "#ef4444"
                     ],
                     borderWidth: 2,
-                    borderColor: "#ffffff"
+                    borderColor: initialPalette.doughnutBorder
                 }]
             },
             options: {
@@ -182,18 +216,19 @@ const monthlyValues = JSON.parse(chartData.dataset.monthlyValues);
                 maintainAspectRatio: false,
                 plugins: {
                     legend: {
-                        position: "bottom"
+                        position: "bottom",
+                        labels: { color: initialPalette.textColor }
                     }
                 }
             }
-        });
+        }));
     }
 
     if (categoryValues.reduce((sum, value) => sum + value, 0) === 0) {
         document.getElementById("categoryEmpty").hidden = false;
         categoryCanvas.hidden = true;
     } else {
-        new Chart(categoryCanvas, {
+        charts.push(new Chart(categoryCanvas, {
             type: "bar",
             data: {
                 labels: categoryLabels,
@@ -208,11 +243,14 @@ const monthlyValues = JSON.parse(chartData.dataset.monthlyValues);
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: {
+                    x: {
+                        ticks: { color: initialPalette.textColor },
+                        grid: { color: initialPalette.gridColor }
+                    },
                     y: {
                         beginAtZero: true,
-                        ticks: {
-                            precision: 0
-                        }
+                        ticks: { precision: 0, color: initialPalette.textColor },
+                        grid: { color: initialPalette.gridColor }
                     }
                 },
                 plugins: {
@@ -221,10 +259,10 @@ const monthlyValues = JSON.parse(chartData.dataset.monthlyValues);
                     }
                 }
             }
-        });
+        }));
     }
 
-    new Chart(monthlyCanvas, {
+    charts.push(new Chart(monthlyCanvas, {
         type: "line",
         data: {
             labels: monthlyLabels,
@@ -243,15 +281,30 @@ const monthlyValues = JSON.parse(chartData.dataset.monthlyValues);
             responsive: true,
             maintainAspectRatio: false,
             scales: {
+                x: {
+                    ticks: { color: initialPalette.textColor },
+                    grid: { color: initialPalette.gridColor }
+                },
                 y: {
                     beginAtZero: true,
-                    ticks: {
-                        precision: 0
-                    }
+                    ticks: { precision: 0, color: initialPalette.textColor },
+                    grid: { color: initialPalette.gridColor }
+                }
+            },
+            plugins: {
+                legend: {
+                    labels: { color: initialPalette.textColor }
                 }
             }
         }
-    });
+    }));
+
+    const themeToggle = document.getElementById("darkModeToggle");
+    if (themeToggle) {
+        themeToggle.addEventListener("click", function () {
+            setTimeout(applyChartTheme, 0);
+        });
+    }
 });
 </script>
 
