@@ -13,6 +13,13 @@ from flask import (
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+
 app = Flask(__name__)
 
 limiter = Limiter(
@@ -27,6 +34,8 @@ app.config["SECRET_KEY"] = os.environ.get(
 )
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
+DUPLICATE_SIMILARITY_THRESHOLD = 0.35
 
 STATUSES = ("Submitted", "In Progress", "Resolved", "Rejected")
 CATEGORIES = (
@@ -183,7 +192,7 @@ def classify_complaint(title, description, category, requested_priority=""):
 
 
 def extract_keywords(text):
-    """Extract meaningful lowercase keywords (>3 chars) for duplicate detection."""
+    """Extract meaningful lowercase keywords (>3 chars) for fallback duplicate detection."""
     stopwords = {
         "this", "that", "with", "from", "have", "been", "were", "they",
         "their", "there", "about", "which", "when", "where", "please",
@@ -191,6 +200,47 @@ def extract_keywords(text):
     }
     words = re.findall(r"[a-z0-9\-]{4,}", text.lower())
     return [w for w in words if w not in stopwords]
+
+
+def find_duplicate_complaint(new_text, recent_complaints, threshold=DUPLICATE_SIMILARITY_THRESHOLD):
+    """Find the closest matching recent complaint using TF-IDF + cosine similarity, with keyword fallback."""
+    if not recent_complaints:
+        return None
+
+    candidate_texts = [
+        f"{row['title']} {row['description']}".strip()
+        for row in recent_complaints
+    ]
+
+    if SKLEARN_AVAILABLE and any(candidate_texts):
+        try:
+            vectorizer = TfidfVectorizer(
+                stop_words="english",
+                ngram_range=(1, 2),
+                max_features=2000
+            )
+            tfidf_matrix = vectorizer.fit_transform([new_text] + candidate_texts)
+            similarities = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
+
+            best_idx = int(similarities.argmax())
+            best_score = float(similarities[best_idx])
+
+            if best_score >= threshold:
+                return recent_complaints[best_idx]
+            return None
+        except ValueError:
+            pass
+
+    new_keywords = set(extract_keywords(new_text))
+    for existing in recent_complaints:
+        existing_keywords = set(
+            extract_keywords(f"{existing['title']} {existing['description']}")
+        )
+        common = new_keywords.intersection(existing_keywords)
+        if len(common) >= 2:
+            return existing
+
+    return None
 
 
 def generate_ai_insights(title, description):
@@ -862,15 +912,10 @@ def new_complaint():
                 (category, (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M"))
             ).fetchall()
 
-            new_keywords = set(extract_keywords(f"{title} {description}"))
-            matched_ticket = None
-
-            for existing in recent_complaints:
-                existing_keywords = set(extract_keywords(f"{existing['title']} {existing['description']}"))
-                common = new_keywords.intersection(existing_keywords)
-                if len(common) >= 2:
-                    matched_ticket = existing
-                    break
+            matched_ticket = find_duplicate_complaint(
+                f"{title} {description}",
+                recent_complaints
+            )
 
             if matched_ticket:
                 return render_template(
