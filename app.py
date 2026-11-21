@@ -38,6 +38,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 DUPLICATE_SIMILARITY_THRESHOLD = 0.35
 
 STATUSES = ("Submitted", "In Progress", "Resolved", "Rejected")
+PRIORITIES = ("High", "Medium", "Low")
 CATEGORIES = (
     "Infrastructure", "Academics", "Hostel",
     "Library", "IT Support", "Other"
@@ -71,34 +72,39 @@ DEPARTMENT_RULES = [
     )),
 ]
 
-# Comprehensive High-Severity Keywords List (100+ terms)
+# Comprehensive High-Severity Keywords List (100+ terms + common phrase variants)
 HIGH_SEVERITY_KEYWORDS = [
     # Ragging, Harassment & Safety
     "ragging", "harassment", "bullying", "mental torture", "threat", "assault",
     "violence", "stalking", "abuse", "discrimination", "safety", "hazard",
     "danger", "risk", "unsafe", "vulnerability", "security breach", "unauthorized entry",
-    
-    # Fire & Electrical Emergencies
+
+    # Fire, Electrical & Utility Outages
     "fire", "spark", "sparking", "short circuit", "broken electrical", "switchboard",
-    "exposed wire", "live wire", "power failure", "blackout", "transformer blast",
-    "burning smell", "smoke", "malfunctioning socket", "fuse blown",
-    
+    "exposed wire", "live wire", "power failure", "power outage", "electricity outage",
+    "blackout", "transformer blast", "burning smell", "smoke", "malfunctioning socket",
+    "fuse blown", "no water", "zero water", "water cut off", "water supply cut",
+    "water outage", "water shortage", "no electricity", "wi-fi down", "wifi down",
+    "internet down", "network down",
+
     # Water, Sanitation & Biohazards
     "water contamination", "contaminated", "poison", "toxic", "sewage overflow",
     "drainage blockage", "stagnant water", "cholera", "disease outbreak",
-    "unclean drinking water", "rotten food", "insect infestation", "pest menace",
+    "unclean drinking water", "drinking water", "washroom", "toilet", "sanitation",
+    "hygiene", "rotten food", "insect infestation", "pest menace",
     "biohazard", "hazardous waste", "chemical leak", "gas leak",
-    
+
     # Structural Integrity & Collapse Risks
     "collapse", "structural damage", "cracked wall", "falling ceiling", "roof leak",
     "broken staircase", "loose balcony", "shattered glass", "blocked emergency exit",
     "faulty elevator", "stuck lift", "damaged foundation",
-    
-    # Medical & Physical Emergencies
+
+    # Medical, Academic & Physical Emergencies
     "injury", "injured", "accident", "bleeding", "unconscious", "medical emergency",
     "ambulance", "severe allergic reaction", "food poisoning", "electric shock",
     "burn", "fracture", "fainting", "suicide threat", "depression crisis",
-    
+    "exam clash", "exam cancelled", "exam postponed", "exams tomorrow",
+
     # Critical Campus Incidents & Crimes
     "theft", "robbery", "burglary", "stolen", "vandalism", "property damage",
     "weapon", "drugs", "alcohol consumption", "ragging complaint", "extortion",
@@ -106,7 +112,10 @@ HIGH_SEVERITY_KEYWORDS = [
 ]
 
 HIGH_SEVERITY_PATTERN = re.compile(
-    r"\b(" + "|".join(re.escape(term) for term in HIGH_SEVERITY_KEYWORDS) + r")\b",
+    r"\b(?:" + "|".join(
+        re.escape(term).replace(r"\ ", r"[\s-]+")
+        for term in HIGH_SEVERITY_KEYWORDS
+    ) + r")\b",
     re.IGNORECASE
 )
 
@@ -116,29 +125,29 @@ LOW_SEVERITY_KEYWORDS = [
     "inquiry", "enquiry", "question", "doubt", "clarification", "information",
     "details", "guidelines", "procedure", "process", "schedule", "timetable",
     "timing", "calendar", "notification", "circular", "announcement", "updates",
-    
+
     # Suggestions & Feedback
     "suggestion", "feedback", "proposal", "recommendation", "idea", "opinion",
     "improvement", "enhancement", "upgrade request", "wishlist", "review",
     "appreciation", "compliment", "comment", "thought",
-    
+
     # General Requests & Amenities
     "request", "general", "optional", "preference", "convenience", "access",
     "permission", "concession", "pass", "card reissue", "identity card replacement",
     "locker", "parking space", "bicycle rack", "drinking water station addition",
     "shade", "seating arrangement", "bench", "lighting adjustment",
-    
+
     # Sports, Cultural & Extracurricular
     "sports equipment", "gym equipment", "cultural event", "fest", "club activity",
     "society", "competition", "tournament", "practice session", "auditorium booking",
     "seminar hall", "exhibition", "newsletter", "magazine", "membership",
-    
+
     # Administrative Assistance & Minor Adjustments
     "form submission", "document collection", "certificate copy", "bonafide request",
     "fee structure doubt", "library card renewal", "book exchange", "reading room seating",
     "wifi password update", "email alias", "portal assistance", "profile correction",
     "address update", "contact change", "spelling correction", "minor adjustment",
-    
+
     # Non-Urgent Feedback
     "routine check", "periodic maintenance", "cleaning schedule", "dustbin placement",
     "signboard", "notice board", "directional board", "campus landscaping",
@@ -146,13 +155,19 @@ LOW_SEVERITY_KEYWORDS = [
 ]
 
 LOW_SEVERITY_PATTERN = re.compile(
-    r"\b(" + "|".join(re.escape(term) for term in LOW_SEVERITY_KEYWORDS) + r")\b",
+    r"\b(?:" + "|".join(
+        re.escape(term).replace(r"\ ", r"[\s-]+")
+        for term in LOW_SEVERITY_KEYWORDS
+    ) + r")\b",
     re.IGNORECASE
 )
 
 
-def classify_complaint(title, description, category, requested_priority=""):
-    """Determine department routing, regex severity score, and SLA deadline."""
+def classify_complaint(title, description, category, requested_priority="", corroborating_count=0):
+    """
+    Determine department routing, verified priority, and SLA deadline.
+    Returns (routed_department, priority, sla_due_at, was_downgraded_from_high).
+    """
     combined_text = f"{title} {description}"
 
     # 1. Keyword Auto-Routing (with category fallback)
@@ -175,11 +190,20 @@ def classify_complaint(title, description, category, requested_priority=""):
             category, "General Administration"
         )
 
-    # 2. Robust Regex-Based Severity Scoring
-    if HIGH_SEVERITY_PATTERN.search(combined_text) or requested_priority == "High":
-        priority = "High"
+    # 2. Verified Severity Scoring (Dropdown "High" requires high-severity match or corroborating reports)
+    has_high_signal = bool(HIGH_SEVERITY_PATTERN.search(combined_text)) or (corroborating_count >= 2)
+    was_downgraded = False
+
+    if requested_priority == "High":
+        if has_high_signal:
+            priority = "High"
+        else:
+            priority = "Medium"
+            was_downgraded = True
     elif requested_priority in ("Medium", "Low"):
         priority = requested_priority
+    elif has_high_signal:
+        priority = "High"
     elif LOW_SEVERITY_PATTERN.search(combined_text):
         priority = "Low"
     else:
@@ -188,7 +212,7 @@ def classify_complaint(title, description, category, requested_priority=""):
     # 3. SLA Deadline Calculation
     sla_due_at = datetime.now().astimezone() + timedelta(hours=SLA_HOURS[priority])
 
-    return routed_department, priority, sla_due_at
+    return routed_department, priority, sla_due_at, was_downgraded
 
 
 def extract_keywords(text):
@@ -246,13 +270,13 @@ def find_duplicate_complaint(new_text, recent_complaints, threshold=DUPLICATE_SI
 def generate_ai_insights(title, description):
     """Generate a lightweight heuristic summary and sentiment badge."""
     text = f"{title} {description}".lower()
-    
+
     frustration_words = [
         "angry", "bad", "terrible", "worst", "unacceptable",
         "foul", "danger", "health", "hazard", "useless"
     ]
     score = sum(1 for word in frustration_words if word in text)
-    
+
     if score >= 2 or "emergency" in text or "ragging" in text:
         sentiment = "High Frustration / Critical"
         ai_badge = "🚨 Critical Alert"
@@ -262,9 +286,9 @@ def generate_ai_insights(title, description):
     else:
         sentiment = "Standard Inquiry"
         ai_badge = "ℹ️ General"
-        
+
     summary = description[:140] + "..." if len(description) > 140 else description
-    
+
     return {
         "sentiment": sentiment,
         "badge": ai_badge,
@@ -283,12 +307,12 @@ def get_db():
             DATABASE_URL,
             row_factory=dict_row
         )
-        
+
     return g.db
 
 
 def log_security_event(event_type, student_id=None, details=None):
-    """Record a security event without storing passwords."""
+    """Record a security/audit event without storing passwords."""
     try:
         with psycopg.connect(
             DATABASE_URL,
@@ -312,6 +336,29 @@ def log_security_event(event_type, student_id=None, details=None):
         app.logger.exception("Could not save security audit event.")
 
 
+def get_recent_priority_downgrade_count(db, user_id):
+    """Count how many times a student's requested High priority was downgraded in the last 30 days."""
+    user_row = db.execute(
+        "SELECT student_id FROM users WHERE user_id = %s",
+        (user_id,)
+    ).fetchone()
+    if not user_row or not user_row["student_id"]:
+        return 0
+
+    cutoff = datetime.now().astimezone() - timedelta(days=30)
+    row = db.execute(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM security_audit_logs
+        WHERE student_id = %s
+          AND event_type = 'priority_downgraded'
+          AND created_at >= %s
+        """,
+        (user_row["student_id"], cutoff)
+    ).fetchone()
+    return int(row["cnt"]) if row else 0
+
+
 @app.teardown_appcontext
 def close_db(error=None):
     db = g.pop("db", None)
@@ -324,7 +371,7 @@ def init_db():
         DATABASE_URL,
         row_factory=dict_row
     ) as db:
-        
+
         db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
@@ -738,7 +785,7 @@ def register():
                     "invalid_student_id",
                     student_id=student_id,
                     details="Registration attempted with an unapproved student ID"
-                ) 
+                )
                 flash("This student ID is not on the approved college list.")
                 return render_template("register.html")
 
@@ -820,7 +867,7 @@ def login():
             if selected_role == "admin" and actual_role != "admin":
                 flash("Access denied: This account is not an Administrator.")
                 return render_template("login.html")
-            
+
             if selected_role == "committee" and actual_role != "committee":
                 flash("Access denied: This account is not a Committee member.")
                 return render_template("login.html")
@@ -884,6 +931,7 @@ def new_complaint():
         abort(403)
 
     db = get_db()
+    recent_downgrades = get_recent_priority_downgrade_count(db, session["user_id"])
 
     if request.method == "POST":
         title = request.form.get("title", "").strip()
@@ -894,44 +942,57 @@ def new_complaint():
 
         if not title or not description or category not in CATEGORIES:
             flash("Enter all fields and choose a valid category.")
-            return render_template("new_complaint.html", categories=CATEGORIES)
+            return render_template(
+                "new_complaint.html",
+                categories=CATEGORIES,
+                recent_downgrades=recent_downgrades
+            )
         elif len(title) > 120 or len(description) > 5000:
             flash("Title or description is too long.")
-            return render_template("new_complaint.html", categories=CATEGORIES)
-
-        if not bypass_duplicate:
-            recent_complaints = db.execute(
-                """
-                SELECT complaint_id, title, description, category, created_at
-                FROM complaints
-                WHERE category = %s
-                  AND status IN ('Submitted', 'In Progress')
-                  AND created_at >= %s
-                ORDER BY complaint_id DESC
-                """,
-                (category, (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M"))
-            ).fetchall()
-
-            matched_ticket = find_duplicate_complaint(
-                f"{title} {description}",
-                recent_complaints
+            return render_template(
+                "new_complaint.html",
+                categories=CATEGORIES,
+                recent_downgrades=recent_downgrades
             )
 
-            if matched_ticket:
-                return render_template(
-                    "new_complaint.html",
-                    categories=CATEGORIES,
-                    duplicate_match=matched_ticket,
-                    form_data={
-                        "title": title,
-                        "description": description,
-                        "category": category,
-                        "priority": requested_priority
-                    }
-                )
+        recent_complaints = db.execute(
+            """
+            SELECT complaint_id, title, description, category, created_at, upvote_count
+            FROM complaints
+            WHERE category = %s
+              AND status IN ('Submitted', 'In Progress')
+              AND created_at >= %s
+            ORDER BY complaint_id DESC
+            """,
+            (category, (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M"))
+        ).fetchall()
 
-        routed_dept, priority, sla_due_at = classify_complaint(
-            title, description, category, requested_priority
+        matched_ticket = find_duplicate_complaint(
+            f"{title} {description}",
+            recent_complaints
+        )
+
+        if not bypass_duplicate and matched_ticket:
+            return render_template(
+                "new_complaint.html",
+                categories=CATEGORIES,
+                duplicate_match=matched_ticket,
+                recent_downgrades=recent_downgrades,
+                form_data={
+                    "title": title,
+                    "description": description,
+                    "category": category,
+                    "priority": requested_priority
+                }
+            )
+
+        corroborating_count = max(
+            len(recent_complaints),
+            int(matched_ticket["upvote_count"]) if matched_ticket else 0
+        )
+
+        routed_dept, priority, sla_due_at, was_downgraded = classify_complaint(
+            title, description, category, requested_priority, corroborating_count
         )
 
         cur = db.execute(
@@ -956,12 +1017,43 @@ def new_complaint():
             """,
             (complaint_id, session["user_id"])
         )
+
+        if was_downgraded:
+            user_row = db.execute(
+                "SELECT student_id FROM users WHERE user_id = %s",
+                (session["user_id"],)
+            ).fetchone()
+            student_sid = user_row["student_id"] if user_row else None
+            db.execute(
+                """
+                INSERT INTO security_audit_logs
+                    (event_type, student_id, ip_address, details)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (
+                    "priority_downgraded",
+                    student_sid,
+                    request.remote_addr,
+                    f"CMP-{complaint_id:05d}: requested High -> set to Medium (no severe keywords or multi-student corroboration)"
+                )
+            )
+
         db.commit()
 
-        flash(f"Complaint submitted successfully. Routed to: {routed_dept} [{priority} Priority]. Reference: CMP-{complaint_id:05d}")
+        if was_downgraded:
+            flash(
+                f"Complaint submitted (Reference: CMP-{complaint_id:05d}). Routed to: {routed_dept}. "
+                "Marked as Medium priority (automatic high-priority requires safety/critical keywords or multiple reports; Admin can adjust if needed)."
+            )
+        else:
+            flash(f"Complaint submitted successfully. Routed to: {routed_dept} [{priority} Priority]. Reference: CMP-{complaint_id:05d}")
         return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
-    return render_template("new_complaint.html", categories=CATEGORIES)
+    return render_template(
+        "new_complaint.html",
+        categories=CATEGORIES,
+        recent_downgrades=recent_downgrades
+    )
 
 
 @app.route("/complaint/<int:complaint_id>/upvote", methods=["POST"])
@@ -1341,6 +1433,7 @@ def committee_dashboard():
 def update_complaint(complaint_id):
     status = request.form.get("status", "")
     remarks = request.form.get("remarks", "").strip()
+    new_priority = request.form.get("priority", "").strip()
 
     if status not in STATUSES or len(remarks) > 1000:
         flash("Invalid status or remarks.")
@@ -1348,24 +1441,45 @@ def update_complaint(complaint_id):
 
     db = get_db()
     complaint = db.execute(
-        "SELECT complaint_id FROM complaints WHERE complaint_id = %s",
+        "SELECT complaint_id, priority, user_id FROM complaints WHERE complaint_id = %s",
         (complaint_id,)
     ).fetchone()
 
     if complaint is None:
         abort(404)
 
+    old_priority = complaint["priority"] or "Medium"
+    final_priority = new_priority if new_priority in PRIORITIES else old_priority
+    priority_changed = final_priority != old_priority
+
+    logged_remarks = remarks
+    if priority_changed:
+        priority_note = f"[Priority changed: {old_priority} → {final_priority}]"
+        logged_remarks = f"{priority_note} {remarks}".strip()
+
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
-        "UPDATE complaints SET status = %s WHERE complaint_id = %s",
-        (status, complaint_id)
+        "UPDATE complaints SET status = %s, priority = %s WHERE complaint_id = %s",
+        (status, final_priority, complaint_id)
     )
     db.execute(
         """INSERT INTO complaint_updates
            (complaint_id, admin_id, status, remarks, updated_at)
            VALUES (%s, %s, %s, %s, %s)""",
-        (complaint_id, session["user_id"], status, remarks, now)
+        (complaint_id, session["user_id"], status, logged_remarks, now)
     )
+
+    if priority_changed and old_priority == "High" and final_priority in ("Medium", "Low"):
+        student_row = db.execute(
+            "SELECT student_id FROM users WHERE user_id = %s",
+            (complaint["user_id"],)
+        ).fetchone()
+        log_security_event(
+            "priority_downgraded",
+            student_id=student_row["student_id"] if student_row else None,
+            details=f"CMP-{complaint_id:05d}: Admin changed priority {old_priority} -> {final_priority}"
+        )
+
     db.commit()
     flash(f"Complaint CMP-{complaint_id:05d} updated.")
     return redirect(url_for("complaint_detail", complaint_id=complaint_id))
@@ -1779,7 +1893,7 @@ def create_default_admin():
             existing = db.execute(
                 "SELECT user_id FROM users WHERE role = 'admin' LIMIT 1"
             ).fetchone()
-            
+
             if not existing:
                 db.execute(
                     """
@@ -1802,7 +1916,7 @@ def create_default_committee():
                 "SELECT user_id FROM users WHERE email = %s LIMIT 1",
                 ("committee@gmail.com",)
             ).fetchone()
-            
+
             if not existing:
                 row = db.execute(
                     """
@@ -1812,7 +1926,7 @@ def create_default_committee():
                     """,
                     ("Committee", "committee@gmail.com", generate_password_hash("committee123"))
                 ).fetchone()
-                
+
                 user_id = row[0]
                 db.execute(
                     """

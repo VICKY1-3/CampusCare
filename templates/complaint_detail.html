@@ -293,7 +293,7 @@
             <div>
                 <h2 class="content-title">Update Complaint</h2>
                 <p class="text-muted mb-0">
-                    Change the status and add a note for the student.
+                    Change the status, adjust priority if needed, and add a note for the student.
                 </p>
             </div>
         </div>
@@ -303,20 +303,40 @@
                   action="{{ url_for('update_complaint',
                                      complaint_id=complaint.complaint_id) }}">
 
-                <label for="status" class="form-label fw-semibold">
-                    Complaint status
-                </label>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="status" class="form-label fw-semibold">
+                            Complaint status
+                        </label>
 
-                <select id="status" name="status"
-                        class="form-select mb-3" required>
-                    {% for status in ['Submitted', 'In Progress',
-                                      'Resolved', 'Rejected'] %}
-                    <option value="{{ status }}"
-                        {% if status == complaint.status %}selected{% endif %}>
-                        {{ status }}
-                    </option>
-                    {% endfor %}
-                </select>
+                        <select id="status" name="status"
+                                class="form-select" required>
+                            {% for status in ['Submitted', 'In Progress',
+                                              'Resolved', 'Rejected'] %}
+                            <option value="{{ status }}"
+                                {% if status == complaint.status %}selected{% endif %}>
+                                {{ status }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-6 mb-3">
+                        <label for="priority" class="form-label fw-semibold">
+                            Priority level
+                        </label>
+
+                        <select id="priority" name="priority"
+                                class="form-select" required>
+                            {% for prio in ['High', 'Medium', 'Low'] %}
+                            <option value="{{ prio }}"
+                                {% if prio == (complaint.priority or 'Medium') %}selected{% endif %}>
+                                {{ prio }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
 
                 <label for="remarks" class="form-label fw-semibold">
                     Admin remarks
