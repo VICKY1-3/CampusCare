@@ -35,11 +35,13 @@
             </div>
 
             <div class="d-flex flex-wrap gap-3 align-items-center pt-3 border-top">
+                {% if duplicate_match.user_id != session.get('user_id') %}
                 <form method="post" action="{{ url_for('upvote_complaint', complaint_id=duplicate_match.complaint_id) }}">
                     <button type="submit" class="btn btn-warning fw-semibold px-4">
                         👍 Upvote Existing Ticket (CMP-{{ "%05d"|format(duplicate_match.complaint_id) }})
                     </button>
                 </form>
+                {% endif %}
 
                 <form method="post" class="d-inline">
                     <input type="hidden" name="title" value="{{ form_data.title }}">

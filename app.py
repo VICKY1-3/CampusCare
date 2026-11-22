@@ -957,14 +957,19 @@ def new_complaint():
 
         recent_complaints = db.execute(
             """
-            SELECT complaint_id, title, description, category, created_at, upvote_count
+            SELECT complaint_id, user_id, title, description, category, created_at, upvote_count
             FROM complaints
             WHERE category = %s
+              AND user_id != %s
               AND status IN ('Submitted', 'In Progress')
               AND created_at >= %s
             ORDER BY complaint_id DESC
             """,
-            (category, (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M"))
+            (
+                category,
+                session["user_id"],
+                (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M")
+            )
         ).fetchall()
 
         matched_ticket = find_duplicate_complaint(
@@ -1064,12 +1069,16 @@ def upvote_complaint(complaint_id):
 
     db = get_db()
     complaint = db.execute(
-        "SELECT complaint_id FROM complaints WHERE complaint_id = %s",
+        "SELECT complaint_id, user_id FROM complaints WHERE complaint_id = %s",
         (complaint_id,)
     ).fetchone()
 
     if complaint is None:
         abort(404)
+
+    if complaint["user_id"] == session["user_id"]:
+        flash("You cannot upvote your own complaint.")
+        return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
     try:
         db.execute(
