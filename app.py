@@ -1,9 +1,11 @@
 import os
 import re
+import math
+from collections import Counter
 import psycopg
 from psycopg.rows import dict_row
 from functools import wraps
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import click
@@ -16,6 +18,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.metrics.pairwise import cosine_similarity
+    from sklearn.naive_bayes import MultinomialNB
+    from sklearn.pipeline import Pipeline
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
@@ -49,28 +53,63 @@ SLA_HOURS = {
     "Low": 168       # 7 days for Low
 }
 
-DEPARTMENT_RULES = [
-    ("Accounts Department", re.compile(
-        r"\b(fee|fees|transaction|payment|refund|scholarship|receipt|fine|dues)\b",
-        re.IGNORECASE
-    )),
-    ("Estate / Maintenance Department", re.compile(
-        r"\b(hostel|water|electricity|power|wiring|switchboard|plumbing|washroom|fan|ac|leak|roof|furniture|wifi|wi-fi)\b",
-        re.IGNORECASE
-    )),
-    ("Examination / Admin Cell", re.compile(
-        r"\b(exam|exams|marks|grade|result|id card|admit card|hall ticket|certificate|transcript|attendance|registration)\b",
-        re.IGNORECASE
-    )),
-    ("Library & Academic Resources", re.compile(
-        r"\b(library|book|books|journal|reading room|syllabus)\b",
-        re.IGNORECASE
-    )),
-    ("IT & Lab Infrastructure", re.compile(
-        r"\b(computer|pc|lab|software|network|server|internet|projector|portal)\b",
-        re.IGNORECASE
-    )),
-]
+DEPARTMENT_SCORING_RULES = {
+    "Examination / Admin Cell": {
+        "strong": re.compile(
+            r"\b(admit\s*card|hall\s*ticket|exam\s*(?:form|schedule|timetable|clash|centre|center|postponed|cancelled|result)|marks?|grade\s*sheet|transcript|migration\s*certificate|bonafide|degree\s*certificate|revaluation|re-?checking|backlog|attendance\s*shortage|enrollment|enrolment|admission\s*cell)\b",
+            re.IGNORECASE,
+        ),
+        "moderate": re.compile(
+            r"\b(exam|exams|examination|result|certificate|id\s*card|registration|semester|syllabus|faculty|professor|lecture|class\s*schedule)\b",
+            re.IGNORECASE,
+        ),
+        "categories": {"Academics"},
+    },
+    "IT & Lab Infrastructure": {
+        "strong": re.compile(
+            r"\b(wi-?fi|internet|network|ethernet|router|portal|login\s*error|server\s*down|computer\s*lab|pc\s*not\s*working|projector|software\s*license|erp)\b",
+            re.IGNORECASE,
+        ),
+        "moderate": re.compile(
+            r"\b(computer|pc|laptop|lab|system|software|website|app|account|password|printer|scanner)\b",
+            re.IGNORECASE,
+        ),
+        "categories": {"IT Support"},
+    },
+    "Estate / Maintenance Department": {
+        "strong": re.compile(
+            r"\b(no\s*water|water\s*(?:supply|leak|cut|shortage)|power\s*(?:cut|outage|failure)|electricity|switchboard|short\s*circuit|wiring|plumbing|washroom|toilet|sewage|drainage|fan|ac|air\s*conditioner|roof\s*leak|hostel\s*room|mess\s*food)\b",
+            re.IGNORECASE,
+        ),
+        "moderate": re.compile(
+            r"\b(hostel|water|light|lights|fan|room|mess|warden|furniture|bench|door|window|cleaning|sanitation|maintenance|repair)\b",
+            re.IGNORECASE,
+        ),
+        "categories": {"Hostel", "Infrastructure"},
+    },
+    "Library & Academic Resources": {
+        "strong": re.compile(
+            r"\b(library\s*card|book\s*(?:unavailable|shortage|issue|return|fine)|reading\s*room|reference\s*book|journal|e-?journal|library\s*fine)\b",
+            re.IGNORECASE,
+        ),
+        "moderate": re.compile(
+            r"\b(library|book|books|journal|magazine|reading)\b",
+            re.IGNORECASE,
+        ),
+        "categories": {"Library"},
+    },
+    "Accounts Department": {
+        "strong": re.compile(
+            r"\b(fee\s*(?:receipt|refund|payment|dues|structure)|tuition\s*fee|scholarship|challan|overcharged|double\s*payment|security\s*deposit)\b",
+            re.IGNORECASE,
+        ),
+        "moderate": re.compile(
+            r"\b(fee|fees|payment|refund|receipt|fine|dues|billing|amount)\b",
+            re.IGNORECASE,
+        ),
+        "categories": set(),
+    },
+}
 
 # Comprehensive High-Severity Keywords List (100+ terms + common phrase variants)
 HIGH_SEVERITY_KEYWORDS = [
@@ -162,36 +201,314 @@ LOW_SEVERITY_PATTERN = re.compile(
     re.IGNORECASE
 )
 
+# Labeled campus complaint corpus for lightweight TF-IDF + Multinomial Naive Bayes classifiers
+LABELED_TRAINING_SAMPLES = [
+    # (text, department, priority)
+    ("Live exposed electrical wire sparking near hostel staircase", "Estate / Maintenance Department", "High"),
+    ("No water supply in boys hostel washrooms since morning", "Estate / Maintenance Department", "High"),
+    ("Short circuit and burning smell from classroom switchboard", "Estate / Maintenance Department", "High"),
+    ("Sewage overflow outside ground floor washroom creating health hazard", "Estate / Maintenance Department", "High"),
+    ("Roof leaking heavily onto electrical panels during rain", "Estate / Maintenance Department", "High"),
+    ("Ceiling fan is not working in classroom 204", "Estate / Maintenance Department", "Medium"),
+    ("Broken wooden bench and loose window latch in lecture hall", "Estate / Maintenance Department", "Medium"),
+    ("Hostel room tube light flickering and needs replacement", "Estate / Maintenance Department", "Medium"),
+    ("Air conditioner cooling low in seminar room", "Estate / Maintenance Department", "Low"),
+    ("Request to add extra dustbins and benches near garden lawn", "Estate / Maintenance Department", "Low"),
 
-def classify_complaint(title, description, category, requested_priority="", corroborating_count=0):
+    ("Campus Wi-Fi and student portal server completely down before submission", "IT & Lab Infrastructure", "High"),
+    ("Unauthorized access or security breach on student login portal", "IT & Lab Infrastructure", "High"),
+    ("Computer lab systems failing to boot and Ethernet disconnected", "IT & Lab Infrastructure", "Medium"),
+    ("Classroom projector HDMI port malfunctioning during lectures", "IT & Lab Infrastructure", "Medium"),
+    ("Software compiler license expired on lab desktops", "IT & Lab Infrastructure", "Medium"),
+    ("Request Wi-Fi password reset and institutional email alias update", "IT & Lab Infrastructure", "Low"),
+    ("Suggestion to install dark mode and faster search on student portal", "IT & Lab Infrastructure", "Low"),
+
+    ("Two core semester exams scheduled at exact same time exam clash", "Examination / Admin Cell", "High"),
+    ("Admit card not generated and hall ticket missing one day before exam", "Examination / Admin Cell", "High"),
+    ("Ragging and harassment threat reported outside academic block", "Examination / Admin Cell", "High"),
+    ("Internal marks discrepancy and grade sheet revaluation request", "Examination / Admin Cell", "Medium"),
+    ("Attendance shortage calculation error in semester portal", "Examination / Admin Cell", "Medium"),
+    ("Request for bonafide certificate and migration certificate copy", "Examination / Admin Cell", "Low"),
+    ("Inquiry about semester exam timetable and circular details", "Examination / Admin Cell", "Low"),
+    ("Spelling correction needed on student ID card profile", "Examination / Admin Cell", "Low"),
+
+    ("Reference textbooks for database systems out of stock in library", "Library & Academic Resources", "Medium"),
+    ("Library reading room AC and power sockets not working", "Library & Academic Resources", "Medium"),
+    ("E-journal portal access denied from campus network", "Library & Academic Resources", "Medium"),
+    ("Inquiry regarding library card renewal and book return schedule", "Library & Academic Resources", "Low"),
+    ("Suggestion to extend library reading room hours during exams", "Library & Academic Resources", "Low"),
+
+    ("Double tuition fee payment deducted online receipt not generated", "Accounts Department", "Medium"),
+    ("Scholarship disbursement pending despite approved verification", "Accounts Department", "Medium"),
+    ("Security deposit refund delayed after course completion", "Accounts Department", "Medium"),
+    ("Clarification needed on semester fee structure and challan deadline", "Accounts Department", "Low"),
+    ("Request duplicate fee receipt copy for reimbursement", "Accounts Department", "Low"),
+]
+
+_ML_MODELS = None
+
+
+def _get_ml_classifiers():
+    """Lazily train and cache TF-IDF + Multinomial Naive Bayes classifiers for department and priority."""
+    global _ML_MODELS
+    if _ML_MODELS is not None:
+        return _ML_MODELS
+    if not SKLEARN_AVAILABLE:
+        return None
+
+    texts = [sample[0] for sample in LABELED_TRAINING_SAMPLES]
+    departments = [sample[1] for sample in LABELED_TRAINING_SAMPLES]
+    priorities = [sample[2] for sample in LABELED_TRAINING_SAMPLES]
+
+    dept_pipeline = Pipeline([
+        ("tfidf", TfidfVectorizer(stop_words="english", ngram_range=(1, 2), max_features=2500)),
+        ("clf", MultinomialNB(alpha=0.5)),
+    ])
+    dept_pipeline.fit(texts, departments)
+
+    prio_pipeline = Pipeline([
+        ("tfidf", TfidfVectorizer(stop_words="english", ngram_range=(1, 2), max_features=2500)),
+        ("clf", MultinomialNB(alpha=0.5)),
+    ])
+    prio_pipeline.fit(texts, priorities)
+
+    _ML_MODELS = (dept_pipeline, prio_pipeline)
+    return _ML_MODELS
+
+
+def predict_complaint_ml(title, description, category=""):
     """
-    Determine department routing, verified priority, and SLA deadline.
-    Returns (routed_department, priority, sla_due_at, was_downgraded_from_high).
+    Predict (department, dept_confidence, priority, prio_confidence) using TF-IDF + MultinomialNB.
+    Returns None if scikit-learn is unavailable.
     """
-    combined_text = f"{title} {description}"
+    models = _get_ml_classifiers()
+    if models is None:
+        return None
 
-    # 1. Keyword Auto-Routing (with category fallback)
-    routed_department = None
-    for dept_name, pattern in DEPARTMENT_RULES:
-        if pattern.search(combined_text):
-            routed_department = dept_name
-            break
+    dept_model, prio_model = models
+    query_text = f"{category} {title} {description}".strip()
+    if not query_text:
+        return None
 
-    if routed_department is None:
+    dept_probs = dept_model.predict_proba([query_text])[0]
+    dept_idx = int(dept_probs.argmax())
+    pred_dept = str(dept_model.classes_[dept_idx])
+    dept_conf = float(dept_probs[dept_idx])
+
+    prio_probs = prio_model.predict_proba([query_text])[0]
+    prio_idx = int(prio_probs.argmax())
+    pred_prio = str(prio_model.classes_[prio_idx])
+    prio_conf = float(prio_probs[prio_idx])
+
+    return {
+        "department": pred_dept,
+        "dept_confidence": round(dept_conf * 100, 1),
+        "priority": pred_prio,
+        "prio_confidence": round(prio_conf * 100, 1),
+    }
+
+
+def route_to_department(title, description, category, ml_prediction=None):
+    """Score candidate departments using category affinity, strong/moderate rules, and ML confidence."""
+    title_text = title or ""
+    desc_text = description or ""
+
+    scores = {dept: 0.0 for dept in DEPARTMENT_SCORING_RULES}
+    scores["General Administration"] = 1.0 if category == "Other" else 0.0
+
+    for dept, rules in DEPARTMENT_SCORING_RULES.items():
+        if category in rules["categories"]:
+            scores[dept] += 3.0
+
+        strong_title_hits = len(rules["strong"].findall(title_text))
+        strong_desc_hits = len(rules["strong"].findall(desc_text))
+        mod_title_hits = len(rules["moderate"].findall(title_text))
+        mod_desc_hits = len(rules["moderate"].findall(desc_text))
+
+        scores[dept] += (strong_title_hits * 5.0) + (strong_desc_hits * 3.0)
+        scores[dept] += (mod_title_hits * 2.0) + (mod_desc_hits * 1.0)
+
+    # Blend supervised Naive Bayes prediction when confident (>= 45%)
+    if ml_prediction and ml_prediction["dept_confidence"] >= 45.0:
+        ml_dept = ml_prediction["department"]
+        if ml_dept in scores:
+            scores[ml_dept] += 2.5 * (ml_prediction["dept_confidence"] / 100.0)
+
+    best_dept = max(scores.items(), key=lambda item: item[1])[0]
+    if scores[best_dept] == 0:
         category_fallbacks = {
             "Infrastructure": "Estate / Maintenance Department",
             "Hostel": "Estate / Maintenance Department",
             "Academics": "Examination / Admin Cell",
             "Library": "Library & Academic Resources",
             "IT Support": "IT & Lab Infrastructure",
-            "Other": "General Administration"
+            "Other": "General Administration",
         }
-        routed_department = category_fallbacks.get(
-            category, "General Administration"
-        )
+        return category_fallbacks.get(category, "General Administration")
 
-    # 2. Verified Severity Scoring (Dropdown "High" requires high-severity match or corroborating reports)
-    has_high_signal = bool(HIGH_SEVERITY_PATTERN.search(combined_text)) or (corroborating_count >= 2)
+    return best_dept
+
+
+def compute_sla_breach_risk(complaint, now_utc=None, has_active_escalation=False):
+    """
+    Compute an SLA breach risk score (0-100) and risk label for open complaints.
+    Returns None for closed/resolved/rejected tickets.
+    """
+    if complaint.get("status") not in ("Submitted", "In Progress"):
+        return None
+
+    now = now_utc or datetime.now().astimezone()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    priority = complaint.get("priority") or "Medium"
+    sla_window_hours = SLA_HOURS.get(priority, 96)
+    sla_due_at = complaint.get("sla_due_at")
+
+    if sla_due_at is not None:
+        due_dt = sla_due_at
+        if due_dt.tzinfo is None:
+            due_dt = due_dt.replace(tzinfo=timezone.utc)
+        remaining_hours = (due_dt - now).total_seconds() / 3600.0
+        elapsed_ratio = max(0.0, min(1.25, (sla_window_hours - remaining_hours) / sla_window_hours))
+    else:
+        created_raw = complaint.get("created_at")
+        elapsed_ratio = 0.25
+        if created_raw:
+            try:
+                created_dt = datetime.strptime(str(created_raw)[:16], "%Y-%m-%d %H:%M").replace(tzinfo=now.tzinfo)
+                elapsed_hours = max(0.0, (now - created_dt).total_seconds() / 3600.0)
+                elapsed_ratio = max(0.0, min(1.25, elapsed_hours / sla_window_hours))
+            except ValueError:
+                pass
+
+    elapsed_points = min(55.0, (elapsed_ratio / 1.0) * 55.0)
+    priority_points = {"High": 20.0, "Medium": 10.0, "Low": 4.0}.get(priority, 10.0)
+    extra_upvotes = max(0, int(complaint.get("upvote_count") or 1) - 1)
+    upvote_points = min(15.0, extra_upvotes * 5.0)
+    escalation_points = 10.0 if has_active_escalation else 0.0
+
+    score = int(round(min(100.0, elapsed_points + priority_points + upvote_points + escalation_points)))
+
+    if score >= 75:
+        level = "Critical"
+        badge_class = "bg-danger"
+    elif score >= 50:
+        level = "High"
+        badge_class = "bg-warning text-dark"
+    elif score >= 25:
+        level = "Medium"
+        badge_class = "bg-info text-dark"
+    else:
+        level = "Low"
+        badge_class = "bg-secondary"
+
+    return {
+        "score": score,
+        "level": level,
+        "badge_class": badge_class,
+        "elapsed_pct": int(round(min(100.0, elapsed_ratio * 100.0))),
+    }
+
+
+def detect_complaint_surges(db, window_days=14):
+    """
+    Compare each category's last-24-hour volume against its prior 14-day rolling daily average
+    to surface abnormal spikes (e.g., sudden water or Wi-Fi outages).
+    """
+    now_local = datetime.now()
+    cutoff_24h = now_local - timedelta(hours=24)
+    cutoff_baseline = now_local - timedelta(days=window_days + 1)
+
+    rows = db.execute(
+        """
+        SELECT category, title, description, created_at
+        FROM complaints
+        WHERE created_at >= %s
+        ORDER BY complaint_id DESC
+        """,
+        (cutoff_baseline.strftime("%Y-%m-%d %H:%M"),)
+    ).fetchall()
+
+    recent_by_cat = {cat: [] for cat in CATEGORIES}
+    daily_buckets = {
+        cat: {d: 0 for d in range(window_days)}
+        for cat in CATEGORIES
+    }
+
+    for row in rows:
+        cat = row["category"]
+        if cat not in recent_by_cat:
+            continue
+        try:
+            created_dt = datetime.strptime(str(row["created_at"])[:16], "%Y-%m-%d %H:%M")
+        except ValueError:
+            continue
+
+        if created_dt >= cutoff_24h:
+            recent_by_cat[cat].append(row)
+        elif created_dt >= cutoff_baseline:
+            day_offset = int((cutoff_24h - created_dt).total_seconds() // 86400)
+            if 0 <= day_offset < window_days:
+                daily_buckets[cat][day_offset] += 1
+
+    surges = []
+    for cat in CATEGORIES:
+        recent_items = recent_by_cat[cat]
+        recent_count = len(recent_items)
+        if recent_count < 3:
+            continue
+
+        history_counts = list(daily_buckets[cat].values())
+        baseline_avg = sum(history_counts) / float(window_days)
+        variance = sum((c - baseline_avg) ** 2 for c in history_counts) / float(window_days)
+        std_dev = math.sqrt(variance)
+
+        if baseline_avg > 0:
+            ratio = recent_count / baseline_avg
+            z_score = (recent_count - baseline_avg) / std_dev if std_dev > 0 else ratio
+            is_surge = (ratio >= 2.5 and z_score >= 2.0)
+        else:
+            ratio = float(recent_count)
+            z_score = float(recent_count)
+            is_surge = (recent_count >= 4)
+
+        if is_surge:
+            keyword_counts = Counter()
+            for item in recent_items:
+                for kw in set(extract_keywords(f"{item['title']} {item['description']}")):
+                    keyword_counts[kw] += 1
+            top_topics = [kw for kw, _ in keyword_counts.most_common(3)]
+
+            surges.append({
+                "category": cat,
+                "recent_24h": recent_count,
+                "baseline_daily": round(baseline_avg, 2),
+                "multiplier": round(ratio, 1),
+                "z_score": round(z_score, 1),
+                "severity": "Critical" if (recent_count >= 6 or ratio >= 4.0) else "Elevated",
+                "top_topics": top_topics,
+            })
+
+    surges.sort(key=lambda s: (s["recent_24h"], s["multiplier"]), reverse=True)
+    return surges
+
+
+def classify_complaint(title, description, category, requested_priority="", corroborating_count=0):
+    """
+    Combine supervised TF-IDF + Multinomial Naive Bayes predictions with regex safety guardrails.
+    Returns (routed_department, priority, sla_due_at, was_downgraded_from_high).
+    """
+    combined_text = f"{title} {description}"
+    ml_pred = predict_complaint_ml(title, description, category)
+
+    # 1. Hybrid Weighted + ML Department Routing
+    routed_department = route_to_department(title, description, category, ml_prediction=ml_pred)
+
+    # 2. Hybrid Severity Scoring: Regex safety rules + corroboration always protect High urgency
+    has_regex_high = bool(HIGH_SEVERITY_PATTERN.search(combined_text))
+    has_ml_high = bool(ml_pred and ml_pred["priority"] == "High" and ml_pred["prio_confidence"] >= 65.0)
+    has_high_signal = has_regex_high or (corroborating_count >= 2) or has_ml_high
     was_downgraded = False
 
     if requested_priority == "High":
@@ -204,7 +521,9 @@ def classify_complaint(title, description, category, requested_priority="", corr
         priority = requested_priority
     elif has_high_signal:
         priority = "High"
-    elif LOW_SEVERITY_PATTERN.search(combined_text):
+    elif LOW_SEVERITY_PATTERN.search(combined_text) or (
+        ml_pred and ml_pred["priority"] == "Low" and ml_pred["prio_confidence"] >= 55.0
+    ):
         priority = "Low"
     else:
         priority = "Medium"
@@ -267,8 +586,8 @@ def find_duplicate_complaint(new_text, recent_complaints, threshold=DUPLICATE_SI
     return None
 
 
-def generate_ai_insights(title, description):
-    """Generate a lightweight heuristic summary and sentiment badge."""
+def generate_ai_insights(title, description, category=""):
+    """Generate sentiment summary plus supervised ML classifier predictions."""
     text = f"{title} {description}".lower()
 
     frustration_words = [
@@ -288,11 +607,13 @@ def generate_ai_insights(title, description):
         ai_badge = "ℹ️ General"
 
     summary = description[:140] + "..." if len(description) > 140 else description
+    ml_prediction = predict_complaint_ml(title, description, category)
 
     return {
         "sentiment": sentiment,
         "badge": ai_badge,
-        "ai_summary": summary
+        "ai_summary": summary,
+        "ml": ml_prediction,
     }
 
 
@@ -957,7 +1278,7 @@ def new_complaint():
 
         recent_complaints = db.execute(
             """
-            SELECT complaint_id, user_id, title, description, category, created_at, upvote_count
+            SELECT complaint_id, title, description, category, created_at, upvote_count
             FROM complaints
             WHERE category = %s
               AND user_id != %s
@@ -1271,7 +1592,11 @@ def complaint_detail(complaint_id):
         (complaint_id,)
     ).fetchall()
 
-    ai_insights = generate_ai_insights(complaint["title"], complaint["description"])
+    ai_insights = generate_ai_insights(
+        complaint["title"],
+        complaint["description"],
+        complaint["category"]
+    )
 
     return render_template(
         "complaint_detail.html",
@@ -1357,6 +1682,8 @@ def admin_analytics():
         if total_complaints else 0
     )
 
+    surges = detect_complaint_surges(db)
+
     return render_template(
         "admin_analytics.html",
         total_complaints=total_complaints,
@@ -1369,6 +1696,7 @@ def admin_analytics():
         category_values=category_values,
         monthly_labels=monthly_labels,
         monthly_values=monthly_values,
+        surges=surges,
     )
 
 
@@ -1376,8 +1704,9 @@ def admin_analytics():
 @admin_required
 def admin_dashboard():
     db = get_db()
+    now_utc = datetime.now().astimezone()
 
-    complaints = db.execute(
+    raw_complaints = db.execute(
         """
         SELECT complaints.*,
                users.name AS student_name,
@@ -1389,6 +1718,27 @@ def admin_dashboard():
         """
     ).fetchall()
 
+    active_escalated_ids = {
+        row["complaint_id"]
+        for row in db.execute(
+            """
+            SELECT DISTINCT complaint_id
+            FROM complaint_escalations
+            WHERE status IN ('Pending', 'Under Review', 'Referred to Committee')
+            """
+        ).fetchall()
+    }
+
+    complaints = []
+    for row in raw_complaints:
+        item = dict(row)
+        item["sla_risk"] = compute_sla_breach_risk(
+            item,
+            now_utc=now_utc,
+            has_active_escalation=(item["complaint_id"] in active_escalated_ids)
+        )
+        complaints.append(item)
+
     counts = {}
     for status in STATUSES:
         counts[status] = db.execute(
@@ -1396,12 +1746,15 @@ def admin_dashboard():
             (status,)
         ).fetchone()["count"]
 
+    surges = detect_complaint_surges(db)
+
     return render_template(
         "admin_dashboard.html",
         complaints=complaints,
         statuses=STATUSES,
         counts=counts,
-        now_utc=datetime.now().astimezone()
+        now_utc=now_utc,
+        surges=surges,
     )
 
 
@@ -1567,16 +1920,14 @@ def escalate_complaint(complaint_id):
                     assigned_to,
                     status
                 )
-            VALUES (%s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, 'direct_referral', %s, %s, 'Referred to Committee')
             RETURNING escalation_id
             """,
             (
                 complaint_id,
                 session["user_id"],
-                "direct_referral",
                 reason,
                 assigned_to,
-                "Referred to Committee"
             )
         ).fetchone()
 

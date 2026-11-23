@@ -87,12 +87,21 @@
         {% endif %}
 
         <!-- AI Smart Insights Box -->
-        <div class="px-4 py-3 bg-primary bg-opacity-10 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <div>
-                <span class="badge bg-primary me-2">✨ CampusCare AI Assistant</span>
-                <span class="small fw-semibold">Sentiment Analysis: {{ ai_insights.sentiment }}</span>
+        <div class="px-4 py-3 bg-primary bg-opacity-10 border-bottom">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <div>
+                    <span class="badge bg-primary me-2">✨ CampusCare AI Assistant</span>
+                    <span class="small fw-semibold">Sentiment Analysis: {{ ai_insights.sentiment }}</span>
+                </div>
+                <span class="badge bg-body text-body border">{{ ai_insights.badge }}</span>
             </div>
-            <span class="badge bg-body text-body border">{{ ai_insights.badge }}</span>
+            {% if ai_insights.ml %}
+            <div class="small text-muted mt-2">
+                🤖 <strong>Naive Bayes Classifier:</strong>
+                Predicted Dept: <span class="fw-semibold text-body">{{ ai_insights.ml.department }}</span> ({{ ai_insights.ml.dept_confidence }}%) ·
+                Predicted Severity: <span class="fw-semibold text-body">{{ ai_insights.ml.priority }}</span> ({{ ai_insights.ml.prio_confidence }}%)
+            </div>
+            {% endif %}
         </div>
 
         <div class="detail-description">

@@ -18,6 +18,26 @@
     </a>
 </div>
 
+{% if surges %}
+<div class="alert alert-danger border-danger shadow-sm mb-4" role="alert">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <strong>🚨 Anomaly Detection: Active Complaint Surge{{ 's' if surges|length > 1 else '' }}</strong>
+        <span class="badge bg-danger">24h vs 14-day rolling baseline</span>
+    </div>
+    <ul class="mb-0 ps-3">
+        {% for s in surges %}
+        <li class="mb-1">
+            <strong>{{ s.category }}</strong> ({{ s.severity }}): <strong>{{ s.recent_24h }}</strong> complaints in last 24h
+            vs. <strong>{{ s.baseline_daily }}/day</strong> baseline ({{ s.multiplier }}× · z={{ s.z_score }})
+            {% if s.top_topics %}
+                — Keywords: <span class="font-monospace">{{ s.top_topics|join(', ') }}</span>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
 <!-- Summary cards -->
 <div class="row g-3 mb-4">
 

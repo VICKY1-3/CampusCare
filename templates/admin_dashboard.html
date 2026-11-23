@@ -29,6 +29,27 @@
     </div>
 </div>
 
+<!-- Outage / Volume Surge Alert Banner -->
+{% if surges %}
+<div class="alert alert-danger border-danger shadow-sm mb-4" role="alert">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <strong>🚨 Potential Outage / Complaint Volume Surge Detected</strong>
+        <span class="badge bg-danger">{{ surges|length }} active spike{{ 's' if surges|length > 1 else '' }} (last 24h vs 14-day avg)</span>
+    </div>
+    <ul class="mb-0 ps-3">
+        {% for s in surges %}
+        <li class="mb-1">
+            <strong>{{ s.category }}:</strong> {{ s.recent_24h }} complaints in the last 24h
+            (14-day avg: {{ s.baseline_daily }}/day · <strong>{{ s.multiplier }}×</strong> normal)
+            {% if s.top_topics %}
+                — Trending terms: <span class="font-monospace">{{ s.top_topics|join(', ') }}</span>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
 <!-- Statistics cards -->
 <div class="row g-3 mb-4">
 
@@ -153,7 +174,7 @@
                     <th>Student</th>
                     <th>Complaint &amp; Department</th>
                     <th>Priority</th>
-                    <th>SLA / Due</th>
+                    <th>SLA / Due &amp; Risk</th>
                     <th>Status</th>
                     <th>Action</th>
                 </tr>
@@ -209,6 +230,15 @@
                             {% endif %}
                         {% else %}
                             <span class="text-muted small">N/A</span>
+                        {% endif %}
+
+                        {% if c.sla_risk %}
+                            <div class="mt-1">
+                                <span class="badge {{ c.sla_risk.badge_class }}"
+                                      title="SLA elapsed: {{ c.sla_risk.elapsed_pct }}%">
+                                    Risk {{ c.sla_risk.score }}/100 · {{ c.sla_risk.level }}
+                                </span>
+                            </div>
                         {% endif %}
                     </td>
 
