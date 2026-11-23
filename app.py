@@ -124,7 +124,8 @@ HIGH_SEVERITY_KEYWORDS = [
     "blackout", "transformer blast", "burning smell", "smoke", "malfunctioning socket",
     "fuse blown", "no water", "zero water", "water cut off", "water supply cut",
     "water outage", "water shortage", "no electricity", "wi-fi down", "wifi down",
-    "internet down", "network down",
+    "internet down", "network down", "completely down", "internet outage",
+    "wifi outage", "wi-fi outage", "system down", "server down", "connection lost",
 
     # Water, Sanitation & Biohazards
     "water contamination", "contaminated", "poison", "toxic", "sewage overflow",
@@ -156,6 +157,11 @@ HIGH_SEVERITY_PATTERN = re.compile(
         for term in HIGH_SEVERITY_KEYWORDS
     ) + r")\b",
     re.IGNORECASE
+)
+
+OUTAGE_DOWN_PATTERN = re.compile(
+    r"\b(?:wi-?fi|wifi|internet|network|power|water\s+supply)\b.{0,25}\b(?:down|outage|lost|cut\s+off|unavailable)\b",
+    re.IGNORECASE,
 )
 
 # Comprehensive Low-Severity / General Inquiry Keywords List (100+ terms)
@@ -385,8 +391,8 @@ def compute_sla_breach_risk(complaint, now_utc=None, has_active_escalation=False
     elapsed_points = min(55.0, (elapsed_ratio / 1.0) * 55.0)
     priority_points = {"High": 20.0, "Medium": 10.0, "Low": 4.0}.get(priority, 10.0)
     extra_upvotes = max(0, int(complaint.get("upvote_count") or 1) - 1)
-    upvote_points = min(15.0, extra_upvotes * 5.0)
-    escalation_points = 10.0 if has_active_escalation else 0.0
+    upvote_points = min(24.0, extra_upvotes * 8.0)
+    escalation_points = 15.0 if has_active_escalation else 0.0
 
     score = int(round(min(100.0, elapsed_points + priority_points + upvote_points + escalation_points)))
 
@@ -408,6 +414,7 @@ def compute_sla_breach_risk(complaint, now_utc=None, has_active_escalation=False
         "level": level,
         "badge_class": badge_class,
         "elapsed_pct": int(round(min(100.0, elapsed_ratio * 100.0))),
+        "has_escalation": has_active_escalation,
     }
 
 
@@ -505,8 +512,11 @@ def classify_complaint(title, description, category, requested_priority="", corr
     # 1. Hybrid Weighted + ML Department Routing
     routed_department = route_to_department(title, description, category, ml_prediction=ml_pred)
 
-    # 2. Hybrid Severity Scoring: Regex safety rules + corroboration always protect High urgency
-    has_regex_high = bool(HIGH_SEVERITY_PATTERN.search(combined_text))
+    # 2. Hybrid Severity Scoring: Regex safety rules + outage patterns + corroboration protect High urgency
+    has_regex_high = bool(
+        HIGH_SEVERITY_PATTERN.search(combined_text)
+        or OUTAGE_DOWN_PATTERN.search(combined_text)
+    )
     has_ml_high = bool(ml_pred and ml_pred["priority"] == "High" and ml_pred["prio_confidence"] >= 65.0)
     has_high_signal = has_regex_high or (corroborating_count >= 2) or has_ml_high
     was_downgraded = False

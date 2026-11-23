@@ -233,11 +233,14 @@
                         {% endif %}
 
                         {% if c.sla_risk %}
-                            <div class="mt-1">
+                            <div class="mt-1 d-flex flex-wrap gap-1">
                                 <span class="badge {{ c.sla_risk.badge_class }}"
                                       title="SLA elapsed: {{ c.sla_risk.elapsed_pct }}%">
                                     Risk {{ c.sla_risk.score }}/100 · {{ c.sla_risk.level }}
                                 </span>
+                                {% if c.sla_risk.has_escalation %}
+                                    <span class="badge bg-warning text-dark font-monospace">ESCALATED</span>
+                                {% endif %}
                             </div>
                         {% endif %}
                     </td>
