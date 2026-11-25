@@ -42,6 +42,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 DUPLICATE_SIMILARITY_THRESHOLD = 0.35
 
 STATUSES = ("Submitted", "In Progress", "Resolved", "Rejected")
+ACTIVE_STATUSES = ("Submitted", "In Progress")
 PRIORITIES = ("High", "Medium", "Low")
 CATEGORIES = (
     "Infrastructure", "Academics", "Hostel",
@@ -420,8 +421,8 @@ def compute_sla_breach_risk(complaint, now_utc=None, has_active_escalation=False
 
 def detect_complaint_surges(db, window_days=14):
     """
-    Compare each category's last-24-hour volume against its prior 14-day rolling daily average
-    to surface abnormal spikes (e.g., sudden water or Wi-Fi outages).
+    Compare each category's active/unresolved last-24-hour volume (excluding 'Resolved' and
+    'Rejected') against its prior 14-day rolling daily baseline to surface ongoing spikes.
     """
     now_local = datetime.now()
     cutoff_24h = now_local - timedelta(hours=24)
@@ -429,12 +430,19 @@ def detect_complaint_surges(db, window_days=14):
 
     rows = db.execute(
         """
-        SELECT category, title, description, created_at
+        SELECT category, title, description, status, created_at
         FROM complaints
         WHERE created_at >= %s
+          AND (
+              created_at < %s
+              OR status NOT IN ('Resolved', 'Rejected')
+          )
         ORDER BY complaint_id DESC
         """,
-        (cutoff_baseline.strftime("%Y-%m-%d %H:%M"),)
+        (
+            cutoff_baseline.strftime("%Y-%m-%d %H:%M"),
+            cutoff_24h.strftime("%Y-%m-%d %H:%M"),
+        )
     ).fetchall()
 
     recent_by_cat = {cat: [] for cat in CATEGORIES}
@@ -453,7 +461,8 @@ def detect_complaint_surges(db, window_days=14):
             continue
 
         if created_dt >= cutoff_24h:
-            recent_by_cat[cat].append(row)
+            if row.get("status") not in ("Resolved", "Rejected"):
+                recent_by_cat[cat].append(row)
         elif created_dt >= cutoff_baseline:
             day_offset = int((cutoff_24h - created_dt).total_seconds() // 86400)
             if 0 <= day_offset < window_days:
@@ -2325,3 +2334,687 @@ else:
         create_default_committee()
     except Exception as e:
         app.logger.error(f"Startup init error: {e}")
+```[cite: 6]
+
+---
+
+### 2. `templates/admin_dashboard.html`
+
+```html
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard | CampusCare{% endblock %}
+
+{% block content %}
+
+<!-- Admin header -->
+<div class="dashboard-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+    <div>
+        <p class="section-eyebrow mb-1">ADMINISTRATION PORTAL</p>
+        <h1 class="dashboard-title mb-2">Admin Dashboard</h1>
+        <p class="text-muted mb-0">
+            Monitor, review, manage college complaints, and track SLA deadlines.
+        </p>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-3">
+        <a href="{{ url_for('admin_analytics') }}" class="btn btn-primary fw-semibold">
+            📊 View Analytics &amp; Reports →
+        </a>
+
+        <div class="admin-welcome">
+            <span class="admin-avatar">A</span>
+            <div>
+                <div class="fw-bold">{{ session.get('name') }}</div>
+                <small class="text-muted">Administrator</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Outage / Volume Surge Alert Banner (Active / Unresolved Only) -->
+{% if surges %}
+<div class="alert alert-danger border-danger shadow-sm mb-4" role="alert">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <strong>🚨 Potential Outage / Active Complaint Surge Detected</strong>
+        <span class="badge bg-danger">{{ surges|length }} active unresolved spike{{ 's' if surges|length > 1 else '' }} (last 24h vs 14-day avg)</span>
+    </div>
+    <ul class="mb-0 ps-3">
+        {% for s in surges %}
+        <li class="mb-1">
+            <strong>{{ s.category }}:</strong> {{ s.recent_24h }} active unresolved complaint{{ 's' if s.recent_24h > 1 else '' }} in the last 24h
+            (14-day avg: {{ s.baseline_daily }}/day · <strong>{{ s.multiplier }}×</strong> normal)
+            {% if s.top_topics %}
+                — Active trending terms: <span class="font-monospace">{{ s.top_topics|join(', ') }}</span>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<!-- Statistics cards -->
+<div class="row g-3 mb-4">
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-blue">▤</div>
+            <p class="summary-label">Total Complaints</p>
+            <h2 class="summary-number">{{ counts.values()|sum }}</h2>
+            <p class="summary-note">All complaints received</p>
+        </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-amber">◷</div>
+            <p class="summary-label">Submitted</p>
+            <h2 class="summary-number">{{ counts.get('Submitted', 0) }}</h2>
+            <p class="summary-note">Awaiting action</p>
+        </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-purple">↻</div>
+            <p class="summary-label">In Progress</p>
+            <h2 class="summary-number">{{ counts.get('In Progress', 0) }}</h2>
+            <p class="summary-note">Currently being handled</p>
+        </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-green">✓</div>
+            <p class="summary-label">Resolved</p>
+            <h2 class="summary-number">{{ counts.get('Resolved', 0) }}</h2>
+            <p class="summary-note">Successfully resolved</p>
+        </div>
+    </div>
+
+</div>
+
+<!-- Complaints table and filters -->
+<div class="content-card">
+
+    <div class="content-card-header">
+        <div>
+            <h2 class="content-title">All Complaints &amp; SLA Tracker</h2>
+            <p class="text-muted mb-0">
+                Review student submissions, department routing, priorities, and deadlines.
+            </p>
+        </div>
+
+        <span class="total-pill" id="adminComplaintCount">
+            {{ complaints|length }} records
+        </span>
+    </div>
+
+    <!-- Search and filters -->
+    <div class="complaint-filters">
+
+        <div class="filter-search">
+            <label for="adminComplaintSearch" class="visually-hidden">
+                Search complaints
+            </label>
+            <input
+                type="search"
+                id="adminComplaintSearch"
+                class="form-control"
+                placeholder="Search title, reference, student, or department..."
+                autocomplete="off">
+        </div>
+
+        <div class="filter-select">
+            <label for="adminStatusFilter" class="visually-hidden">
+                Filter by status
+            </label>
+            <select id="adminStatusFilter" class="form-select">
+                <option value="">All statuses</option>
+                <option value="Submitted">Submitted</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Resolved">Resolved</option>
+                <option value="Rejected">Rejected</option>
+            </select>
+        </div>
+
+        <div class="filter-select">
+            <label for="adminCategoryFilter" class="visually-hidden">
+                Filter by category
+            </label>
+            <select id="adminCategoryFilter" class="form-select">
+                <option value="">All categories</option>
+                {% for category in complaints|map(attribute='category')|unique|sort %}
+                <option value="{{ category }}">{{ category }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <button type="button" id="adminResetFilters"
+                class="btn btn-outline-secondary">
+            Reset
+        </button>
+
+    </div>
+
+    <div class="filter-chips" role="group" aria-label="Quick status filters">
+        <button type="button" class="filter-chip active" data-admin-chip-status="">All</button>
+        <button type="button" class="filter-chip" data-admin-chip-status="Submitted">Submitted</button>
+        <button type="button" class="filter-chip" data-admin-chip-status="In Progress">In Progress</button>
+        <button type="button" class="filter-chip" data-admin-chip-status="Resolved">Resolved</button>
+    </div>
+
+    <div class="filter-results-text" id="adminFilterResultsText"
+         aria-live="polite">
+        Showing {{ complaints|length }} complaints
+    </div>
+
+    <div class="table-responsive">
+        <table class="table complaint-table mb-0">
+            <thead>
+                <tr>
+                    <th>Reference</th>
+                    <th>Student</th>
+                    <th>Complaint &amp; Department</th>
+                    <th>Priority</th>
+                    <th>SLA / Due &amp; Risk</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+
+            <tbody>
+            {% for c in complaints %}
+                <tr class="admin-complaint-row"
+                    data-title="{{ c.title|lower }}"
+                    data-reference="CMP-{{ '%05d'|format(c.complaint_id) }}"
+                    data-student="{{ c.student_name|lower }}"
+                    data-email="{{ c.student_email|lower }}"
+                    data-department="{{ c.routed_department|lower }}"
+                    data-status="{{ c.status }}"
+                    data-category="{{ c.category }}">
+
+                    <td>
+                        <span class="reference-number">
+                            CMP-{{ "%05d"|format(c.complaint_id) }}
+                        </span>
+                        {% if c.upvote_count > 1 %}
+                        <div><span class="badge bg-body text-body border mt-1">👍 {{ c.upvote_count }} students</span></div>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        <div class="complaint-title">{{ c.student_name }}</div>
+                        <small class="text-muted">{{ c.student_email }}</small>
+                    </td>
+
+                    <td>
+                        <div class="complaint-title">{{ c.title }}</div>
+                        <small class="text-primary fw-semibold">🏢 {{ c.routed_department or 'General Administration' }}</small>
+                    </td>
+
+                    <td>
+                        {% if c.priority == 'High' %}
+                            <span class="badge bg-danger">High / Emergency</span>
+                        {% elif c.priority == 'Low' %}
+                            <span class="badge bg-secondary">Low</span>
+                        {% else %}
+                            <span class="badge bg-info text-dark">Medium</span>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if c.sla_due_at %}
+                            <div class="small fw-semibold {% if c.status in ['Submitted', 'In Progress'] and c.sla_due_at < now_utc %}text-danger{% else %}text-muted{% endif %}">
+                                ⏳ {{ c.sla_due_at.strftime('%d %b %Y, %H:%M') }}
+                            </div>
+                            {% if c.status in ['Submitted', 'In Progress'] and c.sla_due_at < now_utc %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger border border-danger mt-1 font-monospace">OVERDUE</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="text-muted small">N/A</span>
+                        {% endif %}
+
+                        {% if c.sla_risk %}
+                            <div class="mt-1 d-flex flex-wrap gap-1">
+                                <span class="badge {{ c.sla_risk.badge_class }}"
+                                      title="SLA elapsed: {{ c.sla_risk.elapsed_pct }}%">
+                                    Risk {{ c.sla_risk.score }}/100 · {{ c.sla_risk.level }}
+                                </span>
+                                {% if c.sla_risk.has_escalation %}
+                                    <span class="badge bg-warning text-dark font-monospace">ESCALATED</span>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if c.status == 'Submitted' %}
+                            <span class="status-badge status-submitted">
+                                <span class="status-dot"></span> Submitted
+                            </span>
+                        {% elif c.status == 'In Progress' %}
+                            <span class="status-badge status-progress">
+                                <span class="status-dot"></span> In Progress
+                            </span>
+                        {% elif c.status == 'Resolved' %}
+                            <span class="status-badge status-resolved">
+                                <span class="status-dot"></span> Resolved
+                            </span>
+                        {% elif c.status == 'Rejected' %}
+                            <span class="status-badge status-rejected">
+                                <span class="status-dot"></span> Rejected
+                            </span>
+                        {% else %}
+                            <span class="status-badge status-submitted">
+                                {{ c.status }}
+                            </span>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        <a class="btn btn-view"
+                           href="{{ url_for('complaint_detail',
+                                            complaint_id=c.complaint_id) }}">
+                            Manage →
+                        </a>
+                    </td>
+                </tr>
+
+            {% else %}
+                <tr>
+                    <td colspan="7">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">▤</div>
+                            <h3>No complaints yet</h3>
+                            <p>Student complaints will appear here when submitted.</p>
+                        </div>
+                    </td>
+                </tr>
+            {% endfor %}
+
+                <tr id="adminNoMatches" hidden>
+                    <td colspan="7">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">⌕</div>
+                            <h3>No matching complaints found</h3>
+                            <p>Try changing your search or filters.</p>
+                        </div>
+                    </td>
+                </tr>
+
+            </tbody>
+        </table>
+    </div>
+
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const statusSelect = document.getElementById("adminStatusFilter");
+    const chips = Array.from(document.querySelectorAll("[data-admin-chip-status]"));
+    const resetBtn = document.getElementById("adminResetFilters");
+
+    if (!statusSelect || !chips.length) return;
+
+    function syncAdminChips() {
+        chips.forEach((chip) => {
+            chip.classList.toggle("active", chip.dataset.adminChipStatus === statusSelect.value);
+        });
+    }
+
+    chips.forEach((chip) => {
+        chip.addEventListener("click", function () {
+            statusSelect.value = chip.dataset.adminChipStatus;
+            statusSelect.dispatchEvent(new Event("change"));
+            syncAdminChips();
+        });
+    });
+
+    statusSelect.addEventListener("change", syncAdminChips);
+    if (resetBtn) {
+        resetBtn.addEventListener("click", () => setTimeout(syncAdminChips, 0));
+    }
+});
+</script>
+
+{% endblock %}
+```[cite: 7]
+
+---
+
+### 3. `templates/admin_analytics.html`
+
+```html
+{% extends "base.html" %}
+
+{% block title %}Admin Analytics | CampusCare{% endblock %}
+
+{% block content %}
+
+<div class="dashboard-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+    <div>
+        <p class="section-eyebrow mb-1">ADMINISTRATION PORTAL</p>
+        <h1 class="dashboard-title mb-2">Analytics Dashboard</h1>
+        <p class="text-muted mb-0">
+            Insights into college complaints and their resolution.
+        </p>
+    </div>
+
+    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary">
+        ← Back to Admin Dashboard
+    </a>
+</div>
+
+{% if surges %}
+<div class="alert alert-danger border-danger shadow-sm mb-4" role="alert">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <strong>🚨 Anomaly Detection: Active Unresolved Surge{{ 's' if surges|length > 1 else '' }}</strong>
+        <span class="badge bg-danger">Active unresolved (24h) vs 14-day rolling baseline</span>
+    </div>
+    <ul class="mb-0 ps-3">
+        {% for s in surges %}
+        <li class="mb-1">
+            <strong>{{ s.category }}</strong> ({{ s.severity }}): <strong>{{ s.recent_24h }}</strong> active unresolved complaint{{ 's' if s.recent_24h > 1 else '' }} in last 24h
+            vs. <strong>{{ s.baseline_daily }}/day</strong> baseline ({{ s.multiplier }}× · z={{ s.z_score }})
+            {% if s.top_topics %}
+                — Active Keywords: <span class="font-monospace">{{ s.top_topics|join(', ') }}</span>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<!-- Summary cards -->
+<div class="row g-3 mb-4">
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-blue">▤</div>
+            <p class="summary-label">Total Complaints</p>
+            <h2 class="summary-number">{{ total_complaints }}</h2>
+            <p class="summary-note">All recorded complaints</p>
+        </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-green">✓</div>
+            <p class="summary-label">Resolved</p>
+            <h2 class="summary-number">{{ resolved_complaints }}</h2>
+            <p class="summary-note">Successfully resolved</p>
+        </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-amber">◷</div>
+            <p class="summary-label">Pending / In Progress</p>
+            <h2 class="summary-number">{{ pending_complaints }}</h2>
+            <p class="summary-note">Still requiring attention</p>
+        </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+        <div class="summary-card">
+            <div class="summary-icon icon-purple">%</div>
+            <p class="summary-label">Resolution Rate</p>
+            <h2 class="summary-number">{{ resolution_rate }}%</h2>
+            <p class="summary-note">Of all recorded complaints</p>
+        </div>
+    </div>
+
+</div>
+
+<!-- Status and category charts -->
+<div class="row g-4 mb-4">
+
+    <div class="col-12 col-lg-5">
+        <div class="content-card h-100">
+            <div class="content-card-header">
+                <div>
+                    <h2 class="content-title">Complaint Status</h2>
+                    <p class="text-muted mb-0">Current status distribution</p>
+                </div>
+            </div>
+            <div class="analytics-chart-container">
+                <canvas id="statusChart"
+                        role="img"
+                        aria-label="Doughnut chart of complaint statuses"></canvas>
+                <p id="statusEmpty" class="text-muted text-center" hidden>
+                    No complaints available to chart yet.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-7">
+        <div class="content-card h-100">
+            <div class="content-card-header">
+                <div>
+                    <h2 class="content-title">Complaints by Category</h2>
+                    <p class="text-muted mb-0">Distribution across departments</p>
+                </div>
+            </div>
+            <div class="analytics-chart-container">
+                <canvas id="categoryChart"
+                        role="img"
+                        aria-label="Bar chart of complaints by category"></canvas>
+                <p id="categoryEmpty" class="text-muted text-center" hidden>
+                    No complaints available to chart yet.
+                </p>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Monthly trend chart -->
+<div class="content-card mb-4">
+    <div class="content-card-header">
+        <div>
+            <h2 class="content-title">Monthly Complaint Trends</h2>
+            <p class="text-muted mb-0">
+                Complaints submitted over the last six months
+            </p>
+        </div>
+    </div>
+
+    <div class="analytics-chart-container analytics-trend-container">
+        <canvas id="monthlyChart"
+                role="img"
+                aria-label="Line chart of monthly complaint submissions"></canvas>
+    </div>
+</div>
+
+<div
+    id="analytics-data"
+    data-status-labels='{{ status_labels|tojson|forceescape }}'
+    data-status-values='{{ status_values|tojson|forceescape }}'
+    data-category-labels='{{ category_labels|tojson|forceescape }}'
+    data-category-values='{{ category_values|tojson|forceescape }}'
+    data-monthly-labels='{{ monthly_labels|tojson|forceescape }}'
+    data-monthly-values='{{ monthly_values|tojson|forceescape }}'
+></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const chartData = document.getElementById("analytics-data");
+
+    const statusLabels = JSON.parse(chartData.dataset.statusLabels);
+    const statusValues = JSON.parse(chartData.dataset.statusValues);
+    const categoryLabels = JSON.parse(chartData.dataset.categoryLabels);
+    const categoryValues = JSON.parse(chartData.dataset.categoryValues);
+    const monthlyLabels = JSON.parse(chartData.dataset.monthlyLabels);
+    const monthlyValues = JSON.parse(chartData.dataset.monthlyValues);
+
+    const statusCanvas = document.getElementById("statusChart");
+    const categoryCanvas = document.getElementById("categoryChart");
+    const monthlyCanvas = document.getElementById("monthlyChart");
+
+    if (typeof Chart === "undefined") {
+        document.querySelectorAll(".analytics-chart-container").forEach(
+            function (container) {
+                const message = document.createElement("p");
+                message.className = "text-muted text-center";
+                message.textContent =
+                    "Charts could not load. Check your internet connection and refresh.";
+                container.appendChild(message);
+            }
+        );
+        return;
+    }
+
+    const charts = [];
+
+    function getChartPalette() {
+        const isDark = document.documentElement.getAttribute("data-bs-theme") === "dark";
+        return {
+            textColor: isDark ? "#cbd5e1" : "#475569",
+            gridColor: isDark ? "rgba(148, 163, 184, 0.16)" : "rgba(15, 23, 42, 0.08)",
+            doughnutBorder: isDark ? "#1e293b" : "#ffffff"
+        };
+    }
+
+    function applyChartTheme() {
+        const palette = getChartPalette();
+        charts.forEach(function (chart) {
+            if (chart.options.plugins?.legend?.labels) {
+                chart.options.plugins.legend.labels.color = palette.textColor;
+            }
+            if (chart.options.scales?.x) {
+                chart.options.scales.x.ticks.color = palette.textColor;
+                chart.options.scales.x.grid.color = palette.gridColor;
+            }
+            if (chart.options.scales?.y) {
+                chart.options.scales.y.ticks.color = palette.textColor;
+                chart.options.scales.y.grid.color = palette.gridColor;
+            }
+            if (chart.config.type === "doughnut" && chart.data.datasets[0]) {
+                chart.data.datasets[0].borderColor = palette.doughnutBorder;
+            }
+            chart.update();
+        });
+    }
+
+    const initialPalette = getChartPalette();
+
+    if (statusValues.reduce((sum, value) => sum + value, 0) === 0) {
+        document.getElementById("statusEmpty").hidden = false;
+        statusCanvas.hidden = true;
+    } else {
+        charts.push(new Chart(statusCanvas, {
+            type: "doughnut",
+            data: {
+                labels: statusLabels,
+                datasets: [{
+                    data: statusValues,
+                    backgroundColor: [
+                        "#fbbf24", "#6366f1", "#22c55e", "#ef4444"
+                    ],
+                    borderWidth: 2,
+                    borderColor: initialPalette.doughnutBorder
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: "bottom",
+                        labels: { color: initialPalette.textColor }
+                    }
+                }
+            }
+        }));
+    }
+
+    if (categoryValues.reduce((sum, value) => sum + value, 0) === 0) {
+        document.getElementById("categoryEmpty").hidden = false;
+        categoryCanvas.hidden = true;
+    } else {
+        charts.push(new Chart(categoryCanvas, {
+            type: "bar",
+            data: {
+                labels: categoryLabels,
+                datasets: [{
+                    label: "Complaints",
+                    data: categoryValues,
+                    backgroundColor: "#5b8def",
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        ticks: { color: initialPalette.textColor },
+                        grid: { color: initialPalette.gridColor }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        ticks: { precision: 0, color: initialPalette.textColor },
+                        grid: { color: initialPalette.gridColor }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        }));
+    }
+
+    charts.push(new Chart(monthlyCanvas, {
+        type: "line",
+        data: {
+            labels: monthlyLabels,
+            datasets: [{
+                label: "Complaints submitted",
+                data: monthlyValues,
+                borderColor: "#2563eb",
+                backgroundColor: "rgba(37, 99, 235, 0.12)",
+                fill: true,
+                tension: 0.3,
+                pointRadius: 4,
+                pointHoverRadius: 6
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    ticks: { color: initialPalette.textColor },
+                    grid: { color: initialPalette.gridColor }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: { precision: 0, color: initialPalette.textColor },
+                    grid: { color: initialPalette.gridColor }
+                }
+            },
+            plugins: {
+                legend: {
+                    labels: { color: initialPalette.textColor }
+                }
+            }
+        }
+    }));
+
+    const themeToggle = document.getElementById("darkModeToggle");
+    if (themeToggle) {
+        themeToggle.addEventListener("click", function () {
+            setTimeout(applyChartTheme, 0);
+        });
+    }
+});
+</script>
+
+{% endblock %}
+```[cite: 8]
