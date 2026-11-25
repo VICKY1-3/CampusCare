@@ -1,11 +1,9 @@
-```html
 {% extends "base.html" %}
 
 {% block title %}Admin Dashboard | CampusCare{% endblock %}
 
 {% block content %}
 
-<!-- Admin header -->
 <div class="dashboard-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
     <div>
         <p class="section-eyebrow mb-1">ADMINISTRATION PORTAL</p>
@@ -30,7 +28,6 @@
     </div>
 </div>
 
-<!-- Outage / Volume Surge Alert Banner (Active / Unresolved Only) -->
 {% if surges %}
 <div class="alert alert-danger border-danger shadow-sm mb-4" role="alert">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
@@ -51,7 +48,6 @@
 </div>
 {% endif %}
 
-<!-- Statistics cards -->
 <div class="row g-3 mb-4">
 
     <div class="col-6 col-xl-3">
@@ -92,7 +88,6 @@
 
 </div>
 
-<!-- Complaints table and filters -->
 <div class="content-card">
 
     <div class="content-card-header">
@@ -108,7 +103,6 @@
         </span>
     </div>
 
-    <!-- Search and filters -->
     <div class="complaint-filters">
 
         <div class="filter-search">
@@ -337,342 +331,3 @@ document.addEventListener("DOMContentLoaded", function () {
 </script>
 
 {% endblock %}
-```[cite: 7]
-
----
-
-### 3. `templates/admin_analytics.html`
-
-```html
-{% extends "base.html" %}
-
-{% block title %}Admin Analytics | CampusCare{% endblock %}
-
-{% block content %}
-
-<div class="dashboard-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
-    <div>
-        <p class="section-eyebrow mb-1">ADMINISTRATION PORTAL</p>
-        <h1 class="dashboard-title mb-2">Analytics Dashboard</h1>
-        <p class="text-muted mb-0">
-            Insights into college complaints and their resolution.
-        </p>
-    </div>
-
-    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary">
-        ← Back to Admin Dashboard
-    </a>
-</div>
-
-{% if surges %}
-<div class="alert alert-danger border-danger shadow-sm mb-4" role="alert">
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-        <strong>🚨 Anomaly Detection: Active Unresolved Surge{{ 's' if surges|length > 1 else '' }}</strong>
-        <span class="badge bg-danger">Active unresolved (24h) vs 14-day rolling baseline</span>
-    </div>
-    <ul class="mb-0 ps-3">
-        {% for s in surges %}
-        <li class="mb-1">
-            <strong>{{ s.category }}</strong> ({{ s.severity }}): <strong>{{ s.recent_24h }}</strong> active unresolved complaint{{ 's' if s.recent_24h > 1 else '' }} in last 24h
-            vs. <strong>{{ s.baseline_daily }}/day</strong> baseline ({{ s.multiplier }}× · z={{ s.z_score }})
-            {% if s.top_topics %}
-                — Active Keywords: <span class="font-monospace">{{ s.top_topics|join(', ') }}</span>
-            {% endif %}
-        </li>
-        {% endfor %}
-    </ul>
-</div>
-{% endif %}
-
-<!-- Summary cards -->
-<div class="row g-3 mb-4">
-
-    <div class="col-6 col-xl-3">
-        <div class="summary-card">
-            <div class="summary-icon icon-blue">▤</div>
-            <p class="summary-label">Total Complaints</p>
-            <h2 class="summary-number">{{ total_complaints }}</h2>
-            <p class="summary-note">All recorded complaints</p>
-        </div>
-    </div>
-
-    <div class="col-6 col-xl-3">
-        <div class="summary-card">
-            <div class="summary-icon icon-green">✓</div>
-            <p class="summary-label">Resolved</p>
-            <h2 class="summary-number">{{ resolved_complaints }}</h2>
-            <p class="summary-note">Successfully resolved</p>
-        </div>
-    </div>
-
-    <div class="col-6 col-xl-3">
-        <div class="summary-card">
-            <div class="summary-icon icon-amber">◷</div>
-            <p class="summary-label">Pending / In Progress</p>
-            <h2 class="summary-number">{{ pending_complaints }}</h2>
-            <p class="summary-note">Still requiring attention</p>
-        </div>
-    </div>
-
-    <div class="col-6 col-xl-3">
-        <div class="summary-card">
-            <div class="summary-icon icon-purple">%</div>
-            <p class="summary-label">Resolution Rate</p>
-            <h2 class="summary-number">{{ resolution_rate }}%</h2>
-            <p class="summary-note">Of all recorded complaints</p>
-        </div>
-    </div>
-
-</div>
-
-<!-- Status and category charts -->
-<div class="row g-4 mb-4">
-
-    <div class="col-12 col-lg-5">
-        <div class="content-card h-100">
-            <div class="content-card-header">
-                <div>
-                    <h2 class="content-title">Complaint Status</h2>
-                    <p class="text-muted mb-0">Current status distribution</p>
-                </div>
-            </div>
-            <div class="analytics-chart-container">
-                <canvas id="statusChart"
-                        role="img"
-                        aria-label="Doughnut chart of complaint statuses"></canvas>
-                <p id="statusEmpty" class="text-muted text-center" hidden>
-                    No complaints available to chart yet.
-                </p>
-            </div>
-        </div>
-    </div>
-
-    <div class="col-12 col-lg-7">
-        <div class="content-card h-100">
-            <div class="content-card-header">
-                <div>
-                    <h2 class="content-title">Complaints by Category</h2>
-                    <p class="text-muted mb-0">Distribution across departments</p>
-                </div>
-            </div>
-            <div class="analytics-chart-container">
-                <canvas id="categoryChart"
-                        role="img"
-                        aria-label="Bar chart of complaints by category"></canvas>
-                <p id="categoryEmpty" class="text-muted text-center" hidden>
-                    No complaints available to chart yet.
-                </p>
-            </div>
-        </div>
-    </div>
-
-</div>
-
-<!-- Monthly trend chart -->
-<div class="content-card mb-4">
-    <div class="content-card-header">
-        <div>
-            <h2 class="content-title">Monthly Complaint Trends</h2>
-            <p class="text-muted mb-0">
-                Complaints submitted over the last six months
-            </p>
-        </div>
-    </div>
-
-    <div class="analytics-chart-container analytics-trend-container">
-        <canvas id="monthlyChart"
-                role="img"
-                aria-label="Line chart of monthly complaint submissions"></canvas>
-    </div>
-</div>
-
-<div
-    id="analytics-data"
-    data-status-labels='{{ status_labels|tojson|forceescape }}'
-    data-status-values='{{ status_values|tojson|forceescape }}'
-    data-category-labels='{{ category_labels|tojson|forceescape }}'
-    data-category-values='{{ category_values|tojson|forceescape }}'
-    data-monthly-labels='{{ monthly_labels|tojson|forceescape }}'
-    data-monthly-values='{{ monthly_values|tojson|forceescape }}'
-></div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-
-<script>
-document.addEventListener("DOMContentLoaded", function () {
-    const chartData = document.getElementById("analytics-data");
-
-    const statusLabels = JSON.parse(chartData.dataset.statusLabels);
-    const statusValues = JSON.parse(chartData.dataset.statusValues);
-    const categoryLabels = JSON.parse(chartData.dataset.categoryLabels);
-    const categoryValues = JSON.parse(chartData.dataset.categoryValues);
-    const monthlyLabels = JSON.parse(chartData.dataset.monthlyLabels);
-    const monthlyValues = JSON.parse(chartData.dataset.monthlyValues);
-
-    const statusCanvas = document.getElementById("statusChart");
-    const categoryCanvas = document.getElementById("categoryChart");
-    const monthlyCanvas = document.getElementById("monthlyChart");
-
-    if (typeof Chart === "undefined") {
-        document.querySelectorAll(".analytics-chart-container").forEach(
-            function (container) {
-                const message = document.createElement("p");
-                message.className = "text-muted text-center";
-                message.textContent =
-                    "Charts could not load. Check your internet connection and refresh.";
-                container.appendChild(message);
-            }
-        );
-        return;
-    }
-
-    const charts = [];
-
-    function getChartPalette() {
-        const isDark = document.documentElement.getAttribute("data-bs-theme") === "dark";
-        return {
-            textColor: isDark ? "#cbd5e1" : "#475569",
-            gridColor: isDark ? "rgba(148, 163, 184, 0.16)" : "rgba(15, 23, 42, 0.08)",
-            doughnutBorder: isDark ? "#1e293b" : "#ffffff"
-        };
-    }
-
-    function applyChartTheme() {
-        const palette = getChartPalette();
-        charts.forEach(function (chart) {
-            if (chart.options.plugins?.legend?.labels) {
-                chart.options.plugins.legend.labels.color = palette.textColor;
-            }
-            if (chart.options.scales?.x) {
-                chart.options.scales.x.ticks.color = palette.textColor;
-                chart.options.scales.x.grid.color = palette.gridColor;
-            }
-            if (chart.options.scales?.y) {
-                chart.options.scales.y.ticks.color = palette.textColor;
-                chart.options.scales.y.grid.color = palette.gridColor;
-            }
-            if (chart.config.type === "doughnut" && chart.data.datasets[0]) {
-                chart.data.datasets[0].borderColor = palette.doughnutBorder;
-            }
-            chart.update();
-        });
-    }
-
-    const initialPalette = getChartPalette();
-
-    if (statusValues.reduce((sum, value) => sum + value, 0) === 0) {
-        document.getElementById("statusEmpty").hidden = false;
-        statusCanvas.hidden = true;
-    } else {
-        charts.push(new Chart(statusCanvas, {
-            type: "doughnut",
-            data: {
-                labels: statusLabels,
-                datasets: [{
-                    data: statusValues,
-                    backgroundColor: [
-                        "#fbbf24", "#6366f1", "#22c55e", "#ef4444"
-                    ],
-                    borderWidth: 2,
-                    borderColor: initialPalette.doughnutBorder
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: "bottom",
-                        labels: { color: initialPalette.textColor }
-                    }
-                }
-            }
-        }));
-    }
-
-    if (categoryValues.reduce((sum, value) => sum + value, 0) === 0) {
-        document.getElementById("categoryEmpty").hidden = false;
-        categoryCanvas.hidden = true;
-    } else {
-        charts.push(new Chart(categoryCanvas, {
-            type: "bar",
-            data: {
-                labels: categoryLabels,
-                datasets: [{
-                    label: "Complaints",
-                    data: categoryValues,
-                    backgroundColor: "#5b8def",
-                    borderRadius: 6
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        ticks: { color: initialPalette.textColor },
-                        grid: { color: initialPalette.gridColor }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        ticks: { precision: 0, color: initialPalette.textColor },
-                        grid: { color: initialPalette.gridColor }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: false
-                    }
-                }
-            }
-        }));
-    }
-
-    charts.push(new Chart(monthlyCanvas, {
-        type: "line",
-        data: {
-            labels: monthlyLabels,
-            datasets: [{
-                label: "Complaints submitted",
-                data: monthlyValues,
-                borderColor: "#2563eb",
-                backgroundColor: "rgba(37, 99, 235, 0.12)",
-                fill: true,
-                tension: 0.3,
-                pointRadius: 4,
-                pointHoverRadius: 6
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                x: {
-                    ticks: { color: initialPalette.textColor },
-                    grid: { color: initialPalette.gridColor }
-                },
-                y: {
-                    beginAtZero: true,
-                    ticks: { precision: 0, color: initialPalette.textColor },
-                    grid: { color: initialPalette.gridColor }
-                }
-            },
-            plugins: {
-                legend: {
-                    labels: { color: initialPalette.textColor }
-                }
-            }
-        }
-    }));
-
-    const themeToggle = document.getElementById("darkModeToggle");
-    if (themeToggle) {
-        themeToggle.addEventListener("click", function () {
-            setTimeout(applyChartTheme, 0);
-        });
-    }
-});
-</script>
-
-{% endblock %}
-```[cite: 8]

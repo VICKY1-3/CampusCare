@@ -5,7 +5,8 @@ from collections import Counter
 import psycopg
 from psycopg.rows import dict_row
 from functools import wraps
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
+from calendar import month_abbr
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import click
@@ -112,14 +113,10 @@ DEPARTMENT_SCORING_RULES = {
     },
 }
 
-# Comprehensive High-Severity Keywords List (100+ terms + common phrase variants)
 HIGH_SEVERITY_KEYWORDS = [
-    # Ragging, Harassment & Safety
     "ragging", "harassment", "bullying", "mental torture", "threat", "assault",
     "violence", "stalking", "abuse", "discrimination", "safety", "hazard",
     "danger", "risk", "unsafe", "vulnerability", "security breach", "unauthorized entry",
-
-    # Fire, Electrical & Utility Outages
     "fire", "spark", "sparking", "short circuit", "broken electrical", "switchboard",
     "exposed wire", "live wire", "power failure", "power outage", "electricity outage",
     "blackout", "transformer blast", "burning smell", "smoke", "malfunctioning socket",
@@ -127,26 +124,18 @@ HIGH_SEVERITY_KEYWORDS = [
     "water outage", "water shortage", "no electricity", "wi-fi down", "wifi down",
     "internet down", "network down", "completely down", "internet outage",
     "wifi outage", "wi-fi outage", "system down", "server down", "connection lost",
-
-    # Water, Sanitation & Biohazards
     "water contamination", "contaminated", "poison", "toxic", "sewage overflow",
     "drainage blockage", "stagnant water", "cholera", "disease outbreak",
     "unclean drinking water", "drinking water", "washroom", "toilet", "sanitation",
     "hygiene", "rotten food", "insect infestation", "pest menace",
     "biohazard", "hazardous waste", "chemical leak", "gas leak",
-
-    # Structural Integrity & Collapse Risks
     "collapse", "structural damage", "cracked wall", "falling ceiling", "roof leak",
     "broken staircase", "loose balcony", "shattered glass", "blocked emergency exit",
     "faulty elevator", "stuck lift", "damaged foundation",
-
-    # Medical, Academic & Physical Emergencies
     "injury", "injured", "accident", "bleeding", "unconscious", "medical emergency",
     "ambulance", "severe allergic reaction", "food poisoning", "electric shock",
     "burn", "fracture", "fainting", "suicide threat", "depression crisis",
     "exam clash", "exam cancelled", "exam postponed", "exams tomorrow",
-
-    # Critical Campus Incidents & Crimes
     "theft", "robbery", "burglary", "stolen", "vandalism", "property damage",
     "weapon", "drugs", "alcohol consumption", "ragging complaint", "extortion",
     "ragging incident", "emergency", "urgent", "critical", "sos", "immediate action"
@@ -165,36 +154,24 @@ OUTAGE_DOWN_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Comprehensive Low-Severity / General Inquiry Keywords List (100+ terms)
 LOW_SEVERITY_KEYWORDS = [
-    # General Inquiries & Questions
     "inquiry", "enquiry", "question", "doubt", "clarification", "information",
     "details", "guidelines", "procedure", "process", "schedule", "timetable",
     "timing", "calendar", "notification", "circular", "announcement", "updates",
-
-    # Suggestions & Feedback
     "suggestion", "feedback", "proposal", "recommendation", "idea", "opinion",
     "improvement", "enhancement", "upgrade request", "wishlist", "review",
     "appreciation", "compliment", "comment", "thought",
-
-    # General Requests & Amenities
     "request", "general", "optional", "preference", "convenience", "access",
     "permission", "concession", "pass", "card reissue", "identity card replacement",
     "locker", "parking space", "bicycle rack", "drinking water station addition",
     "shade", "seating arrangement", "bench", "lighting adjustment",
-
-    # Sports, Cultural & Extracurricular
     "sports equipment", "gym equipment", "cultural event", "fest", "club activity",
     "society", "competition", "tournament", "practice session", "auditorium booking",
     "seminar hall", "exhibition", "newsletter", "magazine", "membership",
-
-    # Administrative Assistance & Minor Adjustments
     "form submission", "document collection", "certificate copy", "bonafide request",
     "fee structure doubt", "library card renewal", "book exchange", "reading room seating",
     "wifi password update", "email alias", "portal assistance", "profile correction",
     "address update", "contact change", "spelling correction", "minor adjustment",
-
-    # Non-Urgent Feedback
     "routine check", "periodic maintenance", "cleaning schedule", "dustbin placement",
     "signboard", "notice board", "directional board", "campus landscaping",
     "plant watering", "lawn maintenance", "mosquito repellent check", "general upkeep"
@@ -208,9 +185,7 @@ LOW_SEVERITY_PATTERN = re.compile(
     re.IGNORECASE
 )
 
-# Labeled campus complaint corpus for lightweight TF-IDF + Multinomial Naive Bayes classifiers
 LABELED_TRAINING_SAMPLES = [
-    # (text, department, priority)
     ("Live exposed electrical wire sparking near hostel staircase", "Estate / Maintenance Department", "High"),
     ("No water supply in boys hostel washrooms since morning", "Estate / Maintenance Department", "High"),
     ("Short circuit and burning smell from classroom switchboard", "Estate / Maintenance Department", "High"),
@@ -221,7 +196,6 @@ LABELED_TRAINING_SAMPLES = [
     ("Hostel room tube light flickering and needs replacement", "Estate / Maintenance Department", "Medium"),
     ("Air conditioner cooling low in seminar room", "Estate / Maintenance Department", "Low"),
     ("Request to add extra dustbins and benches near garden lawn", "Estate / Maintenance Department", "Low"),
-
     ("Campus Wi-Fi and student portal server completely down before submission", "IT & Lab Infrastructure", "High"),
     ("Unauthorized access or security breach on student login portal", "IT & Lab Infrastructure", "High"),
     ("Computer lab systems failing to boot and Ethernet disconnected", "IT & Lab Infrastructure", "Medium"),
@@ -229,7 +203,6 @@ LABELED_TRAINING_SAMPLES = [
     ("Software compiler license expired on lab desktops", "IT & Lab Infrastructure", "Medium"),
     ("Request Wi-Fi password reset and institutional email alias update", "IT & Lab Infrastructure", "Low"),
     ("Suggestion to install dark mode and faster search on student portal", "IT & Lab Infrastructure", "Low"),
-
     ("Two core semester exams scheduled at exact same time exam clash", "Examination / Admin Cell", "High"),
     ("Admit card not generated and hall ticket missing one day before exam", "Examination / Admin Cell", "High"),
     ("Ragging and harassment threat reported outside academic block", "Examination / Admin Cell", "High"),
@@ -238,13 +211,11 @@ LABELED_TRAINING_SAMPLES = [
     ("Request for bonafide certificate and migration certificate copy", "Examination / Admin Cell", "Low"),
     ("Inquiry about semester exam timetable and circular details", "Examination / Admin Cell", "Low"),
     ("Spelling correction needed on student ID card profile", "Examination / Admin Cell", "Low"),
-
     ("Reference textbooks for database systems out of stock in library", "Library & Academic Resources", "Medium"),
     ("Library reading room AC and power sockets not working", "Library & Academic Resources", "Medium"),
     ("E-journal portal access denied from campus network", "Library & Academic Resources", "Medium"),
     ("Inquiry regarding library card renewal and book return schedule", "Library & Academic Resources", "Low"),
     ("Suggestion to extend library reading room hours during exams", "Library & Academic Resources", "Low"),
-
     ("Double tuition fee payment deducted online receipt not generated", "Accounts Department", "Medium"),
     ("Scholarship disbursement pending despite approved verification", "Accounts Department", "Medium"),
     ("Security deposit refund delayed after course completion", "Accounts Department", "Medium"),
@@ -256,7 +227,6 @@ _ML_MODELS = None
 
 
 def _get_ml_classifiers():
-    """Lazily train and cache TF-IDF + Multinomial Naive Bayes classifiers for department and priority."""
     global _ML_MODELS
     if _ML_MODELS is not None:
         return _ML_MODELS
@@ -284,10 +254,6 @@ def _get_ml_classifiers():
 
 
 def predict_complaint_ml(title, description, category=""):
-    """
-    Predict (department, dept_confidence, priority, prio_confidence) using TF-IDF + MultinomialNB.
-    Returns None if scikit-learn is unavailable.
-    """
     models = _get_ml_classifiers()
     if models is None:
         return None
@@ -316,7 +282,6 @@ def predict_complaint_ml(title, description, category=""):
 
 
 def route_to_department(title, description, category, ml_prediction=None):
-    """Score candidate departments using category affinity, strong/moderate rules, and ML confidence."""
     title_text = title or ""
     desc_text = description or ""
 
@@ -335,7 +300,6 @@ def route_to_department(title, description, category, ml_prediction=None):
         scores[dept] += (strong_title_hits * 5.0) + (strong_desc_hits * 3.0)
         scores[dept] += (mod_title_hits * 2.0) + (mod_desc_hits * 1.0)
 
-    # Blend supervised Naive Bayes prediction when confident (>= 45%)
     if ml_prediction and ml_prediction["dept_confidence"] >= 45.0:
         ml_dept = ml_prediction["department"]
         if ml_dept in scores:
@@ -357,11 +321,7 @@ def route_to_department(title, description, category, ml_prediction=None):
 
 
 def compute_sla_breach_risk(complaint, now_utc=None, has_active_escalation=False):
-    """
-    Compute an SLA breach risk score (0-100) and risk label for open complaints.
-    Returns None for closed/resolved/rejected tickets.
-    """
-    if complaint.get("status") not in ("Submitted", "In Progress"):
+    if complaint.get("status") not in ACTIVE_STATUSES:
         return None
 
     now = now_utc or datetime.now().astimezone()
@@ -511,17 +471,11 @@ def detect_complaint_surges(db, window_days=14):
 
 
 def classify_complaint(title, description, category, requested_priority="", corroborating_count=0):
-    """
-    Combine supervised TF-IDF + Multinomial Naive Bayes predictions with regex safety guardrails.
-    Returns (routed_department, priority, sla_due_at, was_downgraded_from_high).
-    """
     combined_text = f"{title} {description}"
     ml_pred = predict_complaint_ml(title, description, category)
 
-    # 1. Hybrid Weighted + ML Department Routing
     routed_department = route_to_department(title, description, category, ml_prediction=ml_pred)
 
-    # 2. Hybrid Severity Scoring: Regex safety rules + outage patterns + corroboration protect High urgency
     has_regex_high = bool(
         HIGH_SEVERITY_PATTERN.search(combined_text)
         or OUTAGE_DOWN_PATTERN.search(combined_text)
@@ -547,14 +501,12 @@ def classify_complaint(title, description, category, requested_priority="", corr
     else:
         priority = "Medium"
 
-    # 3. SLA Deadline Calculation
     sla_due_at = datetime.now().astimezone() + timedelta(hours=SLA_HOURS[priority])
 
     return routed_department, priority, sla_due_at, was_downgraded
 
 
 def extract_keywords(text):
-    """Extract meaningful lowercase keywords (>3 chars) for fallback duplicate detection."""
     stopwords = {
         "this", "that", "with", "from", "have", "been", "were", "they",
         "their", "there", "about", "which", "when", "where", "please",
@@ -565,7 +517,6 @@ def extract_keywords(text):
 
 
 def find_duplicate_complaint(new_text, recent_complaints, threshold=DUPLICATE_SIMILARITY_THRESHOLD):
-    """Find the closest matching recent complaint using TF-IDF + cosine similarity, with keyword fallback."""
     if not recent_complaints:
         return None
 
@@ -606,7 +557,6 @@ def find_duplicate_complaint(new_text, recent_complaints, threshold=DUPLICATE_SI
 
 
 def generate_ai_insights(title, description, category=""):
-    """Generate sentiment summary plus supervised ML classifier predictions."""
     text = f"{title} {description}".lower()
 
     frustration_words = [
@@ -652,7 +602,8 @@ def get_db():
 
 
 def log_security_event(event_type, student_id=None, details=None):
-    """Record a security/audit event without storing passwords."""
+    if not DATABASE_URL:
+        return
     try:
         with psycopg.connect(
             DATABASE_URL,
@@ -677,7 +628,6 @@ def log_security_event(event_type, student_id=None, details=None):
 
 
 def get_recent_priority_downgrade_count(db, user_id):
-    """Count how many times a student's requested High priority was downgraded in the last 30 days."""
     user_row = db.execute(
         "SELECT student_id FROM users WHERE user_id = %s",
         (user_id,)
@@ -707,11 +657,14 @@ def close_db(error=None):
 
 
 def init_db():
+    if not DATABASE_URL:
+        app.logger.warning("DATABASE_URL is not set; skipping init_db().")
+        return
+
     with psycopg.connect(
         DATABASE_URL,
         row_factory=dict_row
     ) as db:
-
         db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
@@ -777,7 +730,6 @@ def init_db():
             )
         """)
 
-        # Approved college student roster
         db.execute("""
             CREATE TABLE IF NOT EXISTS approved_students (
                 student_id TEXT PRIMARY KEY,
@@ -910,14 +862,12 @@ def init_db():
 
 @app.cli.command("init-db")
 def init_db_command():
-    """Create the database tables."""
     init_db()
     click.echo("Database initialized.")
 
 
 @app.cli.command("create-admin")
 def create_admin_command():
-    """Create an administrator account securely."""
     name = click.prompt("Admin name")
     email = click.prompt("Admin email").strip().lower()
     password = click.prompt(
@@ -927,9 +877,7 @@ def create_admin_command():
     )
 
     if len(password) < 8:
-        raise click.ClickException(
-            "Password must be at least 8 characters."
-        )
+        raise click.ClickException("Password must be at least 8 characters.")
 
     init_db()
 
@@ -942,21 +890,15 @@ def create_admin_command():
                 """,
                 (name, email, generate_password_hash(password))
             )
-
         click.echo("Admin account created.")
-
     except psycopg.errors.UniqueViolation:
-        raise click.ClickException(
-            "That email is already registered."
-        )
+        raise click.ClickException("That email is already registered.")
 
 
 @app.cli.command("create-grievance-account")
 def create_grievance_account_command():
-    """Create a Committee Member account."""
     name = click.prompt("Account holder name").strip()
     email = click.prompt("Account email").strip().lower()
-
     password = click.prompt(
         "Account password",
         hide_input=True,
@@ -967,9 +909,7 @@ def create_grievance_account_command():
         raise click.ClickException("Name cannot be empty.")
 
     if len(password) < 8:
-        raise click.ClickException(
-            "Password must be at least 8 characters."
-        )
+        raise click.ClickException("Password must be at least 8 characters.")
 
     init_db()
 
@@ -981,15 +921,10 @@ def create_grievance_account_command():
                 VALUES (%s, %s, %s, 'committee')
                 RETURNING user_id
                 """,
-                (
-                    name,
-                    email,
-                    generate_password_hash(password)
-                )
+                (name, email, generate_password_hash(password))
             ).fetchone()
 
             user_id = row[0]
-
             db.execute(
                 """
                 INSERT INTO grievance_officers
@@ -998,15 +933,9 @@ def create_grievance_account_command():
                 """,
                 (user_id,)
             )
-
-        click.echo(
-            "Committee Member account created successfully."
-        )
-
+        click.echo("Committee Member account created successfully.")
     except psycopg.errors.UniqueViolation:
-        raise click.ClickException(
-            "That email is already registered."
-        )
+        raise click.ClickException("That email is already registered.")
 
 
 def login_required(view):
@@ -1083,15 +1012,9 @@ def index():
 @limiter.limit("50 per hour")
 def register():
     if request.method == "POST":
-        name = " ".join(
-            request.form.get("name", "").strip().split()
-        )
-        student_id = request.form.get(
-            "student_id", ""
-        ).strip().lower()
-        email = request.form.get(
-            "email", ""
-        ).strip().lower()
+        name = " ".join(request.form.get("name", "").strip().split())
+        student_id = request.form.get("student_id", "").strip().lower()
+        email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
 
         if not name or not student_id or not email or not password:
@@ -1459,9 +1382,7 @@ def request_escalation(complaint_id):
     reason = request.form.get("reason", "").strip()
     if not reason or len(reason) > 1000:
         flash("Please provide an escalation reason (maximum 1000 characters).")
-        return redirect(
-            url_for("complaint_detail", complaint_id=complaint_id)
-        )
+        return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
     db = get_db()
     complaint = db.execute(
@@ -1492,9 +1413,7 @@ def request_escalation(complaint_id):
 
         if existing:
             flash("An active escalation already exists for this complaint.")
-            return redirect(
-                url_for("complaint_detail", complaint_id=complaint_id)
-            )
+            return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
         escalation = db.execute(
             """
@@ -1532,9 +1451,7 @@ def request_escalation(complaint_id):
         )
         flash("Could not submit your escalation request. Please try again.")
 
-    return redirect(
-        url_for("complaint_detail", complaint_id=complaint_id)
-    )
+    return redirect(url_for("complaint_detail", complaint_id=complaint_id))
 
 
 @app.route("/complaint/<int:complaint_id>")
@@ -1550,7 +1467,7 @@ def complaint_detail(complaint_id):
         abort(404)
 
     if session["role"] == "student":
-        if complaint["user_id"] != session["user_id"] and complaint["status"] not in ("Submitted", "In Progress"):
+        if complaint["user_id"] != session["user_id"] and complaint["status"] not in ACTIVE_STATUSES:
             abort(403)
 
     updates = db.execute(
@@ -1652,9 +1569,6 @@ def admin_analytics():
 
     category_labels = [row["category"] for row in category_rows]
     category_values = [row["total"] for row in category_rows]
-
-    from datetime import date
-    from calendar import month_abbr
 
     today = date.today()
     months = []
@@ -1942,12 +1856,7 @@ def escalate_complaint(complaint_id):
             VALUES (%s, %s, 'direct_referral', %s, %s, 'Referred to Committee')
             RETURNING escalation_id
             """,
-            (
-                complaint_id,
-                session["user_id"],
-                reason,
-                assigned_to,
-            )
+            (complaint_id, session["user_id"], reason, assigned_to)
         ).fetchone()
 
         escalation_id = escalation["escalation_id"]
@@ -1958,12 +1867,7 @@ def escalate_complaint(complaint_id):
                 (escalation_id, actor_id, action, notes)
             VALUES (%s, %s, %s, %s)
             """,
-            (
-                escalation_id,
-                session["user_id"],
-                "Directly Referred to Committee",
-                reason
-            )
+            (escalation_id, session["user_id"], "Directly Referred to Committee", reason)
         )
 
         db.commit()
@@ -2247,9 +2151,7 @@ def committee_update_escalation(escalation_id):
 
     except psycopg.Error:
         db.rollback()
-        app.logger.exception(
-            "Failed to update escalation %s", escalation_id
-        )
+        app.logger.exception("Failed to update escalation %s", escalation_id)
         flash("Could not update the escalation. Please try again.")
 
     return redirect(url_for("committee_dashboard"))
@@ -2266,7 +2168,8 @@ def forbidden(error):
 
 
 def create_default_admin():
-    """Automatically create a default admin account if none exists."""
+    if not DATABASE_URL:
+        return
     try:
         with psycopg.connect(DATABASE_URL) as db:
             existing = db.execute(
@@ -2288,7 +2191,8 @@ def create_default_admin():
 
 
 def create_default_committee():
-    """Automatically create a default committee account if none exists."""
+    if not DATABASE_URL:
+        return
     try:
         with psycopg.connect(DATABASE_URL) as db:
             existing = db.execute(
@@ -2334,687 +2238,3 @@ else:
         create_default_committee()
     except Exception as e:
         app.logger.error(f"Startup init error: {e}")
-```[cite: 6]
-
----
-
-### 2. `templates/admin_dashboard.html`
-
-```html
-{% extends "base.html" %}
-
-{% block title %}Admin Dashboard | CampusCare{% endblock %}
-
-{% block content %}
-
-<!-- Admin header -->
-<div class="dashboard-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
-    <div>
-        <p class="section-eyebrow mb-1">ADMINISTRATION PORTAL</p>
-        <h1 class="dashboard-title mb-2">Admin Dashboard</h1>
-        <p class="text-muted mb-0">
-            Monitor, review, manage college complaints, and track SLA deadlines.
-        </p>
-    </div>
-
-    <div class="d-flex flex-wrap align-items-center gap-3">
-        <a href="{{ url_for('admin_analytics') }}" class="btn btn-primary fw-semibold">
-            📊 View Analytics &amp; Reports →
-        </a>
-
-        <div class="admin-welcome">
-            <span class="admin-avatar">A</span>
-            <div>
-                <div class="fw-bold">{{ session.get('name') }}</div>
-                <small class="text-muted">Administrator</small>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Outage / Volume Surge Alert Banner (Active / Unresolved Only) -->
-{% if surges %}
-<div class="alert alert-danger border-danger shadow-sm mb-4" role="alert">
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-        <strong>🚨 Potential Outage / Active Complaint Surge Detected</strong>
-        <span class="badge bg-danger">{{ surges|length }} active unresolved spike{{ 's' if surges|length > 1 else '' }} (last 24h vs 14-day avg)</span>
-    </div>
-    <ul class="mb-0 ps-3">
-        {% for s in surges %}
-        <li class="mb-1">
-            <strong>{{ s.category }}:</strong> {{ s.recent_24h }} active unresolved complaint{{ 's' if s.recent_24h > 1 else '' }} in the last 24h
-            (14-day avg: {{ s.baseline_daily }}/day · <strong>{{ s.multiplier }}×</strong> normal)
-            {% if s.top_topics %}
-                — Active trending terms: <span class="font-monospace">{{ s.top_topics|join(', ') }}</span>
-            {% endif %}
-        </li>
-        {% endfor %}
-    </ul>
-</div>
-{% endif %}
-
-<!-- Statistics cards -->
-<div class="row g-3 mb-4">
-
-    <div class="col-6 col-xl-3">
-        <div class="summary-card">
-            <div class="summary-icon icon-blue">▤</div>
-            <p class="summary-label">Total Complaints</p>
-            <h2 class="summary-number">{{ counts.values()|sum }}</h2>
-            <p class="summary-note">All complaints received</p>
-        </div>
-    </div>
-
-    <div class="col-6 col-xl-3">
-        <div class="summary-card">
-            <div class="summary-icon icon-amber">◷</div>
-            <p class="summary-label">Submitted</p>
-            <h2 class="summary-number">{{ counts.get('Submitted', 0) }}</h2>
-            <p class="summary-note">Awaiting action</p>
-        </div>
-    </div>
-
-    <div class="col-6 col-xl-3">
-        <div class="summary-card">
-            <div class="summary-icon icon-purple">↻</div>
-            <p class="summary-label">In Progress</p>
-            <h2 class="summary-number">{{ counts.get('In Progress', 0) }}</h2>
-            <p class="summary-note">Currently being handled</p>
-        </div>
-    </div>
-
-    <div class="col-6 col-xl-3">
-        <div class="summary-card">
-            <div class="summary-icon icon-green">✓</div>
-            <p class="summary-label">Resolved</p>
-            <h2 class="summary-number">{{ counts.get('Resolved', 0) }}</h2>
-            <p class="summary-note">Successfully resolved</p>
-        </div>
-    </div>
-
-</div>
-
-<!-- Complaints table and filters -->
-<div class="content-card">
-
-    <div class="content-card-header">
-        <div>
-            <h2 class="content-title">All Complaints &amp; SLA Tracker</h2>
-            <p class="text-muted mb-0">
-                Review student submissions, department routing, priorities, and deadlines.
-            </p>
-        </div>
-
-        <span class="total-pill" id="adminComplaintCount">
-            {{ complaints|length }} records
-        </span>
-    </div>
-
-    <!-- Search and filters -->
-    <div class="complaint-filters">
-
-        <div class="filter-search">
-            <label for="adminComplaintSearch" class="visually-hidden">
-                Search complaints
-            </label>
-            <input
-                type="search"
-                id="adminComplaintSearch"
-                class="form-control"
-                placeholder="Search title, reference, student, or department..."
-                autocomplete="off">
-        </div>
-
-        <div class="filter-select">
-            <label for="adminStatusFilter" class="visually-hidden">
-                Filter by status
-            </label>
-            <select id="adminStatusFilter" class="form-select">
-                <option value="">All statuses</option>
-                <option value="Submitted">Submitted</option>
-                <option value="In Progress">In Progress</option>
-                <option value="Resolved">Resolved</option>
-                <option value="Rejected">Rejected</option>
-            </select>
-        </div>
-
-        <div class="filter-select">
-            <label for="adminCategoryFilter" class="visually-hidden">
-                Filter by category
-            </label>
-            <select id="adminCategoryFilter" class="form-select">
-                <option value="">All categories</option>
-                {% for category in complaints|map(attribute='category')|unique|sort %}
-                <option value="{{ category }}">{{ category }}</option>
-                {% endfor %}
-            </select>
-        </div>
-
-        <button type="button" id="adminResetFilters"
-                class="btn btn-outline-secondary">
-            Reset
-        </button>
-
-    </div>
-
-    <div class="filter-chips" role="group" aria-label="Quick status filters">
-        <button type="button" class="filter-chip active" data-admin-chip-status="">All</button>
-        <button type="button" class="filter-chip" data-admin-chip-status="Submitted">Submitted</button>
-        <button type="button" class="filter-chip" data-admin-chip-status="In Progress">In Progress</button>
-        <button type="button" class="filter-chip" data-admin-chip-status="Resolved">Resolved</button>
-    </div>
-
-    <div class="filter-results-text" id="adminFilterResultsText"
-         aria-live="polite">
-        Showing {{ complaints|length }} complaints
-    </div>
-
-    <div class="table-responsive">
-        <table class="table complaint-table mb-0">
-            <thead>
-                <tr>
-                    <th>Reference</th>
-                    <th>Student</th>
-                    <th>Complaint &amp; Department</th>
-                    <th>Priority</th>
-                    <th>SLA / Due &amp; Risk</th>
-                    <th>Status</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-
-            <tbody>
-            {% for c in complaints %}
-                <tr class="admin-complaint-row"
-                    data-title="{{ c.title|lower }}"
-                    data-reference="CMP-{{ '%05d'|format(c.complaint_id) }}"
-                    data-student="{{ c.student_name|lower }}"
-                    data-email="{{ c.student_email|lower }}"
-                    data-department="{{ c.routed_department|lower }}"
-                    data-status="{{ c.status }}"
-                    data-category="{{ c.category }}">
-
-                    <td>
-                        <span class="reference-number">
-                            CMP-{{ "%05d"|format(c.complaint_id) }}
-                        </span>
-                        {% if c.upvote_count > 1 %}
-                        <div><span class="badge bg-body text-body border mt-1">👍 {{ c.upvote_count }} students</span></div>
-                        {% endif %}
-                    </td>
-
-                    <td>
-                        <div class="complaint-title">{{ c.student_name }}</div>
-                        <small class="text-muted">{{ c.student_email }}</small>
-                    </td>
-
-                    <td>
-                        <div class="complaint-title">{{ c.title }}</div>
-                        <small class="text-primary fw-semibold">🏢 {{ c.routed_department or 'General Administration' }}</small>
-                    </td>
-
-                    <td>
-                        {% if c.priority == 'High' %}
-                            <span class="badge bg-danger">High / Emergency</span>
-                        {% elif c.priority == 'Low' %}
-                            <span class="badge bg-secondary">Low</span>
-                        {% else %}
-                            <span class="badge bg-info text-dark">Medium</span>
-                        {% endif %}
-                    </td>
-
-                    <td>
-                        {% if c.sla_due_at %}
-                            <div class="small fw-semibold {% if c.status in ['Submitted', 'In Progress'] and c.sla_due_at < now_utc %}text-danger{% else %}text-muted{% endif %}">
-                                ⏳ {{ c.sla_due_at.strftime('%d %b %Y, %H:%M') }}
-                            </div>
-                            {% if c.status in ['Submitted', 'In Progress'] and c.sla_due_at < now_utc %}
-                                <span class="badge bg-danger bg-opacity-10 text-danger border border-danger mt-1 font-monospace">OVERDUE</span>
-                            {% endif %}
-                        {% else %}
-                            <span class="text-muted small">N/A</span>
-                        {% endif %}
-
-                        {% if c.sla_risk %}
-                            <div class="mt-1 d-flex flex-wrap gap-1">
-                                <span class="badge {{ c.sla_risk.badge_class }}"
-                                      title="SLA elapsed: {{ c.sla_risk.elapsed_pct }}%">
-                                    Risk {{ c.sla_risk.score }}/100 · {{ c.sla_risk.level }}
-                                </span>
-                                {% if c.sla_risk.has_escalation %}
-                                    <span class="badge bg-warning text-dark font-monospace">ESCALATED</span>
-                                {% endif %}
-                            </div>
-                        {% endif %}
-                    </td>
-
-                    <td>
-                        {% if c.status == 'Submitted' %}
-                            <span class="status-badge status-submitted">
-                                <span class="status-dot"></span> Submitted
-                            </span>
-                        {% elif c.status == 'In Progress' %}
-                            <span class="status-badge status-progress">
-                                <span class="status-dot"></span> In Progress
-                            </span>
-                        {% elif c.status == 'Resolved' %}
-                            <span class="status-badge status-resolved">
-                                <span class="status-dot"></span> Resolved
-                            </span>
-                        {% elif c.status == 'Rejected' %}
-                            <span class="status-badge status-rejected">
-                                <span class="status-dot"></span> Rejected
-                            </span>
-                        {% else %}
-                            <span class="status-badge status-submitted">
-                                {{ c.status }}
-                            </span>
-                        {% endif %}
-                    </td>
-
-                    <td>
-                        <a class="btn btn-view"
-                           href="{{ url_for('complaint_detail',
-                                            complaint_id=c.complaint_id) }}">
-                            Manage →
-                        </a>
-                    </td>
-                </tr>
-
-            {% else %}
-                <tr>
-                    <td colspan="7">
-                        <div class="empty-state">
-                            <div class="empty-state-icon">▤</div>
-                            <h3>No complaints yet</h3>
-                            <p>Student complaints will appear here when submitted.</p>
-                        </div>
-                    </td>
-                </tr>
-            {% endfor %}
-
-                <tr id="adminNoMatches" hidden>
-                    <td colspan="7">
-                        <div class="empty-state">
-                            <div class="empty-state-icon">⌕</div>
-                            <h3>No matching complaints found</h3>
-                            <p>Try changing your search or filters.</p>
-                        </div>
-                    </td>
-                </tr>
-
-            </tbody>
-        </table>
-    </div>
-
-</div>
-
-<script>
-document.addEventListener("DOMContentLoaded", function () {
-    const statusSelect = document.getElementById("adminStatusFilter");
-    const chips = Array.from(document.querySelectorAll("[data-admin-chip-status]"));
-    const resetBtn = document.getElementById("adminResetFilters");
-
-    if (!statusSelect || !chips.length) return;
-
-    function syncAdminChips() {
-        chips.forEach((chip) => {
-            chip.classList.toggle("active", chip.dataset.adminChipStatus === statusSelect.value);
-        });
-    }
-
-    chips.forEach((chip) => {
-        chip.addEventListener("click", function () {
-            statusSelect.value = chip.dataset.adminChipStatus;
-            statusSelect.dispatchEvent(new Event("change"));
-            syncAdminChips();
-        });
-    });
-
-    statusSelect.addEventListener("change", syncAdminChips);
-    if (resetBtn) {
-        resetBtn.addEventListener("click", () => setTimeout(syncAdminChips, 0));
-    }
-});
-</script>
-
-{% endblock %}
-```[cite: 7]
-
----
-
-### 3. `templates/admin_analytics.html`
-
-```html
-{% extends "base.html" %}
-
-{% block title %}Admin Analytics | CampusCare{% endblock %}
-
-{% block content %}
-
-<div class="dashboard-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
-    <div>
-        <p class="section-eyebrow mb-1">ADMINISTRATION PORTAL</p>
-        <h1 class="dashboard-title mb-2">Analytics Dashboard</h1>
-        <p class="text-muted mb-0">
-            Insights into college complaints and their resolution.
-        </p>
-    </div>
-
-    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary">
-        ← Back to Admin Dashboard
-    </a>
-</div>
-
-{% if surges %}
-<div class="alert alert-danger border-danger shadow-sm mb-4" role="alert">
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-        <strong>🚨 Anomaly Detection: Active Unresolved Surge{{ 's' if surges|length > 1 else '' }}</strong>
-        <span class="badge bg-danger">Active unresolved (24h) vs 14-day rolling baseline</span>
-    </div>
-    <ul class="mb-0 ps-3">
-        {% for s in surges %}
-        <li class="mb-1">
-            <strong>{{ s.category }}</strong> ({{ s.severity }}): <strong>{{ s.recent_24h }}</strong> active unresolved complaint{{ 's' if s.recent_24h > 1 else '' }} in last 24h
-            vs. <strong>{{ s.baseline_daily }}/day</strong> baseline ({{ s.multiplier }}× · z={{ s.z_score }})
-            {% if s.top_topics %}
-                — Active Keywords: <span class="font-monospace">{{ s.top_topics|join(', ') }}</span>
-            {% endif %}
-        </li>
-        {% endfor %}
-    </ul>
-</div>
-{% endif %}
-
-<!-- Summary cards -->
-<div class="row g-3 mb-4">
-
-    <div class="col-6 col-xl-3">
-        <div class="summary-card">
-            <div class="summary-icon icon-blue">▤</div>
-            <p class="summary-label">Total Complaints</p>
-            <h2 class="summary-number">{{ total_complaints }}</h2>
-            <p class="summary-note">All recorded complaints</p>
-        </div>
-    </div>
-
-    <div class="col-6 col-xl-3">
-        <div class="summary-card">
-            <div class="summary-icon icon-green">✓</div>
-            <p class="summary-label">Resolved</p>
-            <h2 class="summary-number">{{ resolved_complaints }}</h2>
-            <p class="summary-note">Successfully resolved</p>
-        </div>
-    </div>
-
-    <div class="col-6 col-xl-3">
-        <div class="summary-card">
-            <div class="summary-icon icon-amber">◷</div>
-            <p class="summary-label">Pending / In Progress</p>
-            <h2 class="summary-number">{{ pending_complaints }}</h2>
-            <p class="summary-note">Still requiring attention</p>
-        </div>
-    </div>
-
-    <div class="col-6 col-xl-3">
-        <div class="summary-card">
-            <div class="summary-icon icon-purple">%</div>
-            <p class="summary-label">Resolution Rate</p>
-            <h2 class="summary-number">{{ resolution_rate }}%</h2>
-            <p class="summary-note">Of all recorded complaints</p>
-        </div>
-    </div>
-
-</div>
-
-<!-- Status and category charts -->
-<div class="row g-4 mb-4">
-
-    <div class="col-12 col-lg-5">
-        <div class="content-card h-100">
-            <div class="content-card-header">
-                <div>
-                    <h2 class="content-title">Complaint Status</h2>
-                    <p class="text-muted mb-0">Current status distribution</p>
-                </div>
-            </div>
-            <div class="analytics-chart-container">
-                <canvas id="statusChart"
-                        role="img"
-                        aria-label="Doughnut chart of complaint statuses"></canvas>
-                <p id="statusEmpty" class="text-muted text-center" hidden>
-                    No complaints available to chart yet.
-                </p>
-            </div>
-        </div>
-    </div>
-
-    <div class="col-12 col-lg-7">
-        <div class="content-card h-100">
-            <div class="content-card-header">
-                <div>
-                    <h2 class="content-title">Complaints by Category</h2>
-                    <p class="text-muted mb-0">Distribution across departments</p>
-                </div>
-            </div>
-            <div class="analytics-chart-container">
-                <canvas id="categoryChart"
-                        role="img"
-                        aria-label="Bar chart of complaints by category"></canvas>
-                <p id="categoryEmpty" class="text-muted text-center" hidden>
-                    No complaints available to chart yet.
-                </p>
-            </div>
-        </div>
-    </div>
-
-</div>
-
-<!-- Monthly trend chart -->
-<div class="content-card mb-4">
-    <div class="content-card-header">
-        <div>
-            <h2 class="content-title">Monthly Complaint Trends</h2>
-            <p class="text-muted mb-0">
-                Complaints submitted over the last six months
-            </p>
-        </div>
-    </div>
-
-    <div class="analytics-chart-container analytics-trend-container">
-        <canvas id="monthlyChart"
-                role="img"
-                aria-label="Line chart of monthly complaint submissions"></canvas>
-    </div>
-</div>
-
-<div
-    id="analytics-data"
-    data-status-labels='{{ status_labels|tojson|forceescape }}'
-    data-status-values='{{ status_values|tojson|forceescape }}'
-    data-category-labels='{{ category_labels|tojson|forceescape }}'
-    data-category-values='{{ category_values|tojson|forceescape }}'
-    data-monthly-labels='{{ monthly_labels|tojson|forceescape }}'
-    data-monthly-values='{{ monthly_values|tojson|forceescape }}'
-></div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-
-<script>
-document.addEventListener("DOMContentLoaded", function () {
-    const chartData = document.getElementById("analytics-data");
-
-    const statusLabels = JSON.parse(chartData.dataset.statusLabels);
-    const statusValues = JSON.parse(chartData.dataset.statusValues);
-    const categoryLabels = JSON.parse(chartData.dataset.categoryLabels);
-    const categoryValues = JSON.parse(chartData.dataset.categoryValues);
-    const monthlyLabels = JSON.parse(chartData.dataset.monthlyLabels);
-    const monthlyValues = JSON.parse(chartData.dataset.monthlyValues);
-
-    const statusCanvas = document.getElementById("statusChart");
-    const categoryCanvas = document.getElementById("categoryChart");
-    const monthlyCanvas = document.getElementById("monthlyChart");
-
-    if (typeof Chart === "undefined") {
-        document.querySelectorAll(".analytics-chart-container").forEach(
-            function (container) {
-                const message = document.createElement("p");
-                message.className = "text-muted text-center";
-                message.textContent =
-                    "Charts could not load. Check your internet connection and refresh.";
-                container.appendChild(message);
-            }
-        );
-        return;
-    }
-
-    const charts = [];
-
-    function getChartPalette() {
-        const isDark = document.documentElement.getAttribute("data-bs-theme") === "dark";
-        return {
-            textColor: isDark ? "#cbd5e1" : "#475569",
-            gridColor: isDark ? "rgba(148, 163, 184, 0.16)" : "rgba(15, 23, 42, 0.08)",
-            doughnutBorder: isDark ? "#1e293b" : "#ffffff"
-        };
-    }
-
-    function applyChartTheme() {
-        const palette = getChartPalette();
-        charts.forEach(function (chart) {
-            if (chart.options.plugins?.legend?.labels) {
-                chart.options.plugins.legend.labels.color = palette.textColor;
-            }
-            if (chart.options.scales?.x) {
-                chart.options.scales.x.ticks.color = palette.textColor;
-                chart.options.scales.x.grid.color = palette.gridColor;
-            }
-            if (chart.options.scales?.y) {
-                chart.options.scales.y.ticks.color = palette.textColor;
-                chart.options.scales.y.grid.color = palette.gridColor;
-            }
-            if (chart.config.type === "doughnut" && chart.data.datasets[0]) {
-                chart.data.datasets[0].borderColor = palette.doughnutBorder;
-            }
-            chart.update();
-        });
-    }
-
-    const initialPalette = getChartPalette();
-
-    if (statusValues.reduce((sum, value) => sum + value, 0) === 0) {
-        document.getElementById("statusEmpty").hidden = false;
-        statusCanvas.hidden = true;
-    } else {
-        charts.push(new Chart(statusCanvas, {
-            type: "doughnut",
-            data: {
-                labels: statusLabels,
-                datasets: [{
-                    data: statusValues,
-                    backgroundColor: [
-                        "#fbbf24", "#6366f1", "#22c55e", "#ef4444"
-                    ],
-                    borderWidth: 2,
-                    borderColor: initialPalette.doughnutBorder
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: "bottom",
-                        labels: { color: initialPalette.textColor }
-                    }
-                }
-            }
-        }));
-    }
-
-    if (categoryValues.reduce((sum, value) => sum + value, 0) === 0) {
-        document.getElementById("categoryEmpty").hidden = false;
-        categoryCanvas.hidden = true;
-    } else {
-        charts.push(new Chart(categoryCanvas, {
-            type: "bar",
-            data: {
-                labels: categoryLabels,
-                datasets: [{
-                    label: "Complaints",
-                    data: categoryValues,
-                    backgroundColor: "#5b8def",
-                    borderRadius: 6
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        ticks: { color: initialPalette.textColor },
-                        grid: { color: initialPalette.gridColor }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        ticks: { precision: 0, color: initialPalette.textColor },
-                        grid: { color: initialPalette.gridColor }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: false
-                    }
-                }
-            }
-        }));
-    }
-
-    charts.push(new Chart(monthlyCanvas, {
-        type: "line",
-        data: {
-            labels: monthlyLabels,
-            datasets: [{
-                label: "Complaints submitted",
-                data: monthlyValues,
-                borderColor: "#2563eb",
-                backgroundColor: "rgba(37, 99, 235, 0.12)",
-                fill: true,
-                tension: 0.3,
-                pointRadius: 4,
-                pointHoverRadius: 6
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                x: {
-                    ticks: { color: initialPalette.textColor },
-                    grid: { color: initialPalette.gridColor }
-                },
-                y: {
-                    beginAtZero: true,
-                    ticks: { precision: 0, color: initialPalette.textColor },
-                    grid: { color: initialPalette.gridColor }
-                }
-            },
-            plugins: {
-                legend: {
-                    labels: { color: initialPalette.textColor }
-                }
-            }
-        }
-    }));
-
-    const themeToggle = document.getElementById("darkModeToggle");
-    if (themeToggle) {
-        themeToggle.addEventListener("click", function () {
-            setTimeout(applyChartTheme, 0);
-        });
-    }
-});
-</script>
-
-{% endblock %}
-```[cite: 8]
